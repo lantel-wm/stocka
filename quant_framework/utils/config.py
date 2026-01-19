@@ -17,7 +17,7 @@ class Config:
     """
 
     # 策略模块路径
-    STRATEGY_MODULE_PATH = "quant_framework.strategy.ma_strategy"
+    STRATEGY_MODULE_PATH = "quant_framework.strategy"
 
     def __init__(self, config_path: str = "config.yaml"):
         """
