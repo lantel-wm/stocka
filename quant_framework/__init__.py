@@ -8,19 +8,28 @@ __author__ = "Stocka Team"
 
 from .data.data_handler import DataHandler
 from .strategy.base_strategy import BaseStrategy, Signal
-from .strategy.ma_strategy import SimpleMAStrategy
+from .strategy.ma_strategy import SimpleMAStrategy, DoubleMAStrategy, MultiMAStrategy
 from .portfolio.portfolio import Portfolio
 from .execution.transaction_cost import TransactionCost, StandardCost
 from .backtest.engine import BacktestEngine
 from .performance.analyzer import Performance, calculate_all_metrics
 from .realtime.signal_generator import RealTimeSignalGenerator
 from .utils.config import Config, load_config
+from .factor import (
+    BaseFactor,
+    FactorMetrics,
+    MultiFactorAnalysis,
+    Alpha158
+)
 
 __all__ = [
     'DataHandler',
     'BaseStrategy',
     'Signal',
     'SimpleMAStrategy',
+    'DoubleMAStrategy',
+    'MultiMAStrategy',
+    'OrderlyFactorStrategy',
     'Portfolio',
     'TransactionCost',
     'StandardCost',
@@ -29,5 +38,10 @@ __all__ = [
     'calculate_all_metrics',
     'RealTimeSignalGenerator',
     'Config',
-    'load_config'
+    'load_config',
+    'BaseFactor',
+    'FactorMetrics',
+    'MultiFactorAnalysis',
+    'Alpha158',
 ]
+

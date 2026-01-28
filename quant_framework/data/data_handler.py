@@ -96,7 +96,8 @@ class DataHandler:
 
         print(f"开始加载数据，共找到 {len(all_files)} 个CSV文件...")
 
-        for file_path in all_files:
+        from tqdm import tqdm
+        for file_path in tqdm(all_files):
             try:
                 # 读取CSV文件，指定股票代码列为字符串类型以保留前导0
                 df = pd.read_csv(file_path, encoding='utf-8', dtype={'股票代码': str})
@@ -240,6 +241,15 @@ class DataHandler:
                 result[code] = daily_data.loc[code]
 
         return result
+    
+    def get_all_data(self) -> pd.DataFrame:
+        """
+        获取所有日期的所有股票数据
+        
+        Returns:
+            所有股票数据
+        """
+        return self.all_data
 
     def get_all_codes(self) -> List[str]:
         """
