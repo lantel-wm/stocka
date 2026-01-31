@@ -9,6 +9,7 @@ __author__ = "Stocka Team"
 from .data.data_handler import DataHandler
 from .strategy.base_strategy import BaseStrategy, Signal
 from .strategy.ma_strategy import SimpleMAStrategy, DoubleMAStrategy, MultiMAStrategy
+from .strategy.ml_strategy import MLStrategy
 from .portfolio.portfolio import Portfolio
 from .execution.transaction_cost import TransactionCost, StandardCost
 from .backtest.engine import BacktestEngine
@@ -21,6 +22,7 @@ from .factor import (
     MultiFactorAnalysis,
     Alpha158
 )
+from .model import LGBModel
 
 __all__ = [
     'DataHandler',
@@ -30,6 +32,7 @@ __all__ = [
     'DoubleMAStrategy',
     'MultiMAStrategy',
     'OrderlyFactorStrategy',
+    'MLStrategy',
     'Portfolio',
     'TransactionCost',
     'StandardCost',
@@ -43,5 +46,6 @@ __all__ = [
     'FactorMetrics',
     'MultiFactorAnalysis',
     'Alpha158',
+    'LGBModel',
 ]
 
