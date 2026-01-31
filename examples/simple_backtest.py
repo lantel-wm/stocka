@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 from quant_framework import (
     DataHandler,
-    SimpleMAStrategy,
+    MLStrategy,
     BacktestEngine,
     StandardCost,
     Performance,
@@ -29,19 +29,21 @@ def main():
     # ==================== 第1步：初始化数据处理器 ====================
     print("第1步：加载数据...")
     data_handler = DataHandler(
-        data_path="../data/stock/kline/day",
+        data_path="../data/factor/day/alpha158",
         min_data_points=50,
-        stock_whitelist=['000001']  # 只加载平安银行的数据
+        # stock_whitelist=['000001']  # 只加载平安银行的数据
+        use_parquet=True,
+        num_workers=32,
     )
 
     try:
         # 数据加载范围（应该包含回测范围）
-        data_load_start = "2019-01-01"  # 数据开始日期
-        data_load_end = "2021-01-01"    # 数据结束日期
+        data_load_start = "2024-01-02"  # 数据开始日期
+        data_load_end = "2025-12-31"    # 数据结束日期
 
         # 回测范围
-        backtest_start = "2020-01-01"
-        backtest_end = "2020-04-30"
+        backtest_start = "2024-01-03"
+        backtest_end = "2025-12-31"
 
         print(f"数据加载范围: {data_load_start} 至 {data_load_end}")
         print(f"回测范围: {backtest_start} 至 {backtest_end}")
@@ -52,7 +54,7 @@ def main():
         )
     except FileNotFoundError as e:
         print(f"错误：{e}")
-        print("\n请确保数据文件存在于 data/stock/kline/day/ 目录")
+        print("\n请确保数据文件存在于目录")
         return
     except Exception as e:
         print(f"加载数据时出错：{e}")
@@ -62,10 +64,11 @@ def main():
 
     # ==================== 第2步：创建策略 ====================
     print("第2步：创建策略...")
-    strategy = SimpleMAStrategy({
-        'window': 10,   # 均线
-        'max_position': 1,    # 最多同时持有1只股票
-        'stock_list': ['000001']  # 策略只对平安银行生成信号
+    strategy = MLStrategy({
+        'model_path': '../examples/lightgbm_model.pkl',
+        'rebalance_days': 7,
+        'top_k': 10,
+        'stop_loss': 0.03,
     })
     print(f"策略名称: {strategy.name}")
     print(f"策略参数: {strategy.params}")
@@ -128,9 +131,18 @@ def main():
             end_date=backtest_end
         )
 
-        # 导出绩效指标到JSON
+        # 导出绩效指标到JSON（包含交易统计）
         print("导出绩效指标...")
-        metrics_json = report_gen.export_metrics_to_json(metrics)
+        metrics_json = report_gen.export_metrics_to_json(
+            metrics=metrics,
+            trade_analysis=results.get('trade_analysis')
+        )
+
+        # 导出交易分析详情到CSV
+        print("导出交易分析...")
+        analysis_csv = report_gen.export_trade_analysis_to_csv(
+            trade_analysis=results.get('trade_analysis', {})
+        )
 
         # 绘制资金曲线
         print("绘制资金曲线...")

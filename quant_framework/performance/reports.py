@@ -466,12 +466,14 @@ class ReportGenerator:
 
     def export_metrics_to_json(self,
                                 metrics: Dict,
+                                trade_analysis: Optional[Dict] = None,
                                 filename: Optional[str] = None) -> str:
         """
         导出绩效指标到JSON文件
 
         Args:
             metrics: 绩效指标字典
+            trade_analysis: 交易分析结果（可选，用于提取win_rate）
             filename: 文件名（可选）
 
         Returns:
@@ -497,12 +499,84 @@ class ReportGenerator:
                 # 其他类型转换为字符串
                 serializable_metrics[key] = str(value)
 
+        # 从trade_analysis中提取win_rate添加到metrics
+        if trade_analysis and 'win_rate' in trade_analysis:
+            serializable_metrics['win_rate'] = trade_analysis['win_rate']
+
         # 保存到JSON文件
         with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(serializable_metrics, f, indent=2, ensure_ascii=False)
 
         print(f"绩效指标已导出到: {filepath}")
         print(f"  - 指标数量: {len(serializable_metrics)}")
+        if trade_analysis:
+            print(f"  - 完整交易: {trade_analysis.get('completed_trades', 0)} 笔")
+            print(f"  - 胜率: {trade_analysis.get('win_rate', 0):.2f}%")
+
+        return filepath
+
+    def export_trade_analysis_to_csv(self,
+                                     trade_analysis: Dict,
+                                     filename: Optional[str] = None) -> str:
+        """
+        导出交易分析详情到CSV文件
+
+        Args:
+            trade_analysis: 交易分析结果字典
+            filename: 文件名（可选）
+
+        Returns:
+            CSV文件路径
+        """
+        if not trade_analysis or not trade_analysis.get('trade_details'):
+            print("没有交易详情记录")
+            return ""
+
+        # 获取交易详情
+        trade_details = trade_analysis['trade_details']
+
+        # 转换为DataFrame
+        df = pd.DataFrame(trade_details)
+
+        # 重命名列为英文
+        column_mapping = {
+            'code': 'Stock Code',
+            'buy_date': 'Buy Date',
+            'sell_date': 'Sell Date',
+            'buy_price': 'Buy Price',
+            'sell_price': 'Sell Price',
+            'shares': 'Shares',
+            'buy_cost': 'Buy Cost',
+            'sell_income': 'Sell Income',
+            'pnl': 'Profit/Loss',
+            'pnl_pct': 'Profit/Loss %',
+            'buy_reason': 'Buy Reason',
+            'sell_reason': 'Sell Reason'
+        }
+        df = df.rename(columns=column_mapping)
+
+        # 选择需要的列
+        columns_order = ['Stock Code', 'Buy Date', 'Sell Date', 'Buy Price', 'Sell Price',
+                        'Shares', 'Buy Cost', 'Sell Income', 'Profit/Loss', 'Profit/Loss %',
+                        'Buy Reason', 'Sell Reason']
+        df = df[[col for col in columns_order if col in df.columns]]
+
+        # 生成文件名
+        if not filename:
+            filename = "trade_analysis.csv"
+
+        filepath = os.path.join(self.output_dir, filename)
+        df.to_csv(filepath, index=False, encoding='utf-8-sig')
+
+        # 打印统计信息
+        print(f"交易分析已导出到: {filepath}")
+        print(f"  - 完整交易: {trade_analysis.get('completed_trades', 0)} 笔")
+        print(f"  - 盈利交易: {trade_analysis.get('winning_trades', 0)} 笔")
+        print(f"  - 亏损交易: {trade_analysis.get('losing_trades', 0)} 笔")
+        print(f"  - 胜率: {trade_analysis.get('win_rate', 0):.2f}%")
+        print(f"  - 总盈利: {trade_analysis.get('total_profit', 0):,.2f} 元")
+        print(f"  - 总亏损: {trade_analysis.get('total_loss', 0):,.2f} 元")
+        print(f"  - 净盈亏: {trade_analysis.get('total_pnl', 0):,.2f} 元")
 
         return filepath
 
