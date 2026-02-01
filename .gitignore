@@ -111,3 +111,8 @@ strategy_results/
 
 # data
 data/
+examples/data/
+examples/examples/
+examples/reports/
+examples/logs/
+examples/signals/
