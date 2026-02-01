@@ -370,6 +370,48 @@ class DataHandler:
 
         return dates
 
+    def get_previous_trading_date(self, current_date: date, n: int = 1) -> Optional[date]:
+        """
+        获取指定日期前n个交易日的日期
+
+        Args:
+            current_date: 当前日期
+            n: 向前推的交易日数量（默认为1，即前一个交易日）
+
+        Returns:
+            前n个交易日的日期，如果找不到则返回None
+
+        Example:
+            >>> # 获取2024-01-10前一个交易日
+            >>> prev_date = data_handler.get_previous_trading_date(date(2024, 1, 10))
+            >>> # 获取2024-01-10前3个交易日
+            >>> prev_3_date = data_handler.get_previous_trading_date(date(2024, 1, 10), n=3)
+        """
+        if self.all_data is None:
+            raise ValueError("数据未加载，请先调用 load_data()")
+
+        # 获取所有交易日期
+        all_dates = self.available_dates
+
+        # 找到current_date在交易日期中的位置
+        try:
+            current_idx = all_dates.index(current_date)
+        except ValueError:
+            # current_date不是交易日，找到不晚于current_date的最后一个交易日
+            valid_dates = [d for d in all_dates if d <= current_date]
+            if not valid_dates:
+                return None
+            current_idx = all_dates.index(valid_dates[-1])
+
+        # 计算目标索引
+        target_idx = current_idx - n
+
+        # 检查索引是否有效
+        if target_idx < 0:
+            return None
+
+        return all_dates[target_idx]
+
     def update_data(self, new_data: pd.DataFrame) -> None:
         """
         更新数据（用于实盘）
@@ -396,6 +438,46 @@ class DataHandler:
             self.all_data.index.get_level_values('date').unique().to_list()
         )
         self.available_dates = [d.date() for d in self.available_dates]
+
+    def load_index_data(self, index_path: str, start_date: Optional[str] = None,
+                       end_date: Optional[str] = None) -> pd.DataFrame:
+        """
+        加载指数数据（用于benchmark）
+
+        Args:
+            index_path: 指数数据文件路径（CSV格式，英文表头）
+            start_date: 开始日期（YYYY-MM-DD）
+            end_date: 结束日期（YYYY-MM-DD）
+
+        Returns:
+            指数数据DataFrame，包含date和close列
+        """
+        if not os.path.exists(index_path):
+            raise FileNotFoundError(f"指数数据文件不存在: {index_path}")
+
+        # 读取指数数据
+        index_df = pd.read_csv(index_path, encoding='utf-8')
+
+        # 检查必要的列是否存在
+        if 'date' not in index_df.columns or 'close' not in index_df.columns:
+            raise ValueError(f"指数数据文件必须包含date和close列")
+
+        # 转换日期格式
+        index_df['date'] = pd.to_datetime(index_df['date'])
+
+        # 过滤日期范围
+        if start_date:
+            index_df = index_df[index_df['date'] >= pd.to_datetime(start_date)]
+        if end_date:
+            index_df = index_df[index_df['date'] <= pd.to_datetime(end_date)]
+
+        # 只保留需要的列
+        index_df = index_df[['date', 'close']].copy()
+
+        # 按日期排序
+        index_df = index_df.sort_values('date').reset_index(drop=True)
+
+        return index_df
 
     def get_data_info(self) -> Dict:
         """

@@ -17,7 +17,7 @@ from ..model import LGBModel
 class CSZScoreNorm:
     """
     Cross Sectional ZScore Normalization
-    截面标准化：按日期分组进行 z-score 标准化
+    截面标准化: 按日期分组进行 z-score 标准化
     """
 
     def __init__(self, factors: List[str], method: str = "zscore"):
@@ -25,7 +25,7 @@ class CSZScoreNorm:
         初始化
 
         Args:
-            method: 标准化方法，"zscore" 或 "robust"
+            method: 标准化方法, "zscore" 或 "robust"
         """
         if method == "zscore":
             self.zscore_func = self._zscore
@@ -39,16 +39,16 @@ class CSZScoreNorm:
         对指定列进行截面标准化
 
         Args:
-            df: 输入数据（需要有 date 列或多级索引）
+            df: 输入数据 (需要有 date 列或多级索引)
             columns: 需要标准化的列名列表
 
         Returns:
             标准化后的数据
         """
-        # 如果 DataFrame 有 date 列（多级索引已重置）
+        # 如果 DataFrame 有 date 列 (多级索引已重置)
         if 'date' in df.columns:
             df[columns] = df[columns].groupby("date", group_keys=False).apply(self.zscore_func)
-        # 如果 DataFrame 是单日数据（索引是 code）
+        # 如果 DataFrame 是单日数据 (索引是 code)
         else:
             # 直接对所有数据进行标准化
             df[columns] = df[columns].apply(self.zscore_func)
@@ -60,7 +60,7 @@ class CSZScoreNorm:
         return (x - x.mean()) / x.std()
 
     def _robust_zscore(self, x: pd.Series) -> pd.Series:
-        """鲁棒 z-score 标准化（使用中位数和 MAD）"""
+        """鲁棒 z-score 标准化 (使用中位数和 MAD)"""
         median = x.median()
         mad = np.median(np.abs(x - median))
         return (x - median) / (mad * 1.4826)  # 1.4826 是使得 MAD 与标准差可比的常数
@@ -70,23 +70,23 @@ class MLStrategy(BaseStrategy):
     """
     基于机器学习模型的选股策略
 
-    策略逻辑：
+    策略逻辑: 
     1. 每隔 N 个交易日使用模型对所有股票进行预测
     2. 选取预测分数最高的前 K 只股票
     3. 卖出不在新选中的持仓股票
-    4. 买入新选中的股票（等权重或按预测分数加权）
+    4. 买入新选中的股票 (等权重或按预测分数加权)
 
-    参数说明：
-    - model_path: 模型文件路径（.pkl 或 .txt）
-    - top_k: 选取预测分数最高的前 K 只股票（默认：30）
-    - rebalance_days: 调仓周期（天数），每 N 个交易日调仓一次（默认：20）
-    - weight_method: 仓位分配方式，'equal'等权重 或 'score'按分数加权（默认：'equal'）
-    - min_score: 最低预测分数阈值，低于此值的股票不会被选中（默认：None）
-    - hold_days: 持有天数，0 表示不限制（默认：0）
-    - stock_pool: 股票池，None 表示使用全部股票（默认：None）
-    - norm_method: 标准化方法，"zscore" 或 "robust"（默认："zscore"）
-    - stop_loss: 止损阈值（百分比），如 0.05 表示亏损 5% 时止损（默认：None，不启用）
-    - stop_loss_check_daily: 是否每日检查止损，False 表示只在调仓日检查（默认：True）
+    参数说明: 
+    - model_path: 模型文件路径 (.pkl 或 .txt)
+    - top_k: 选取预测分数最高的前 K 只股票 (默认: 30)
+    - rebalance_days: 调仓周期 (天数), 每 N 个交易日调仓一次 (默认: 20)
+    - weight_method: 仓位分配方式, 'equal'等权重 或 'score'按分数加权 (默认: 'equal')
+    - min_score: 最低预测分数阈值, 低于此值的股票不会被选中 (默认: None)
+    - hold_days: 持有天数, 0 表示不限制 (默认: 0)
+    - stock_pool: 股票池, None 表示使用全部股票 (默认: None)
+    - norm_method: 标准化方法, "zscore" 或 "robust" (默认: "zscore")
+    - stop_loss: 止损阈值 (百分比), 如 0.05 表示亏损 5% 时止损 (默认: None, 不启用)
+    - stop_loss_check_daily: 是否每日检查止损, False 表示只在调仓日检查 (默认: True)
     """
 
     def __init__(self, params: Optional[Dict] = None):
@@ -97,15 +97,15 @@ class MLStrategy(BaseStrategy):
             params: 策略参数字典
         """
         default_params = {
-            'model_path': None,          # 模型路径（必需）
+            'model_path': None,          # 模型路径 (必需)
             'top_k': 10,                 # 选股数量
-            'rebalance_days': 5,        # 调仓周期（交易日天数）
+            'rebalance_days': 5,        # 调仓周期 (交易日天数)
             'weight_method': 'equal',    # 仓位分配方式
             'min_score': None,           # 最低分数阈值
             'hold_days': 0,              # 最小持有天数
             'stock_pool': None,          # 股票池
             'norm_method': 'zscore',     # 标准化方法
-            'stop_loss': 0.05,           # 止损阈值（百分比）
+            'stop_loss': 0.05,           # 止损阈值 (百分比)
             'stop_loss_check_daily': True,  # 是否每日检查止损
         }
 
@@ -122,7 +122,7 @@ class MLStrategy(BaseStrategy):
         self.factors = self.model.factors
 
         if not self.factors:
-            raise ValueError("模型中没有 factors 信息，无法进行预测")
+            raise ValueError("模型中没有 factors 信息, 无法进行预测")
 
         # 初始化标准化器
         self.normalizer = CSZScoreNorm(factors=self.factors, method=self.params['norm_method'])
@@ -142,6 +142,10 @@ class MLStrategy(BaseStrategy):
         # position_entries: {code: {'entry_date': date, 'entry_price': float}}
         self.position_entries = {}       # 记录买入日期和买入价格
 
+        # 实盘模式支持
+        self.trading_dates = []          # 交易日历列表
+        self.strategy_start_date = None  # 策略开始运行日期
+
     def on_bar(self, data_handler, current_date: date, portfolio) -> List[Signal]:
         """
         每日运行策略逻辑
@@ -159,7 +163,7 @@ class MLStrategy(BaseStrategy):
         # 增加交易日计数
         self.trading_days_count += 1
 
-        # 检查止损（每日或调仓日）
+        # 检查止损 (每日或调仓日)
         if self.params['stop_loss'] is not None:
             if self.params['stop_loss_check_daily'] or self._is_rebalance_day(current_date):
                 stop_loss_signals = self._check_stop_loss(
@@ -202,7 +206,7 @@ class MLStrategy(BaseStrategy):
         # 更新最后调仓日期
         self.last_rebalance_date = current_date
 
-        print(f"{current_date}: 第 {self.trading_days_count} 个交易日，调仓！选中 {len(selected_stocks)} 只股票，生成 {len(signals)} 个信号")
+        print(f"{current_date}: 第 {self.trading_days_count} 个交易日, 调仓！选中 {len(selected_stocks)} 只股票, 生成 {len(signals)} 个信号")
 
         return signals
 
@@ -245,33 +249,42 @@ class MLStrategy(BaseStrategy):
         Returns:
             股票代码列表
         """
-        # 如果策略指定了股票池，使用策略的股票池
+        # 如果策略指定了股票池, 使用策略的股票池
         if self.params['stock_pool'] is not None:
             return [str(code) for code in self.params['stock_pool']]
 
         # 否则使用全部股票
         return data_handler.get_all_codes()
 
-    def _prepare_prediction_data(self, data_handler, current_date: date,
+    def _prepare_prediction_data(self, data_handler: DataHandler, current_date: date,
                                   stock_pool: List[str]) -> Optional[pd.DataFrame]:
         """
         准备预测所需的数据
 
-        参考训练时的预处理：
-        1. 截面标准化（Cross Sectional Z-Score Normalization）
+        重要：使用 current_date 前一个交易日的数据进行预测，避免未来函数（look-ahead bias）
+
+        参考训练时的预处理:
+        1. 截面标准化 (Cross Sectional Z-Score Normalization)
         2. 填充缺失值为 0
 
         Args:
             data_handler: 数据处理器
-            current_date: 当前日期
+            current_date: 当前日期（将使用前一个交易日的数据）
             stock_pool: 股票池
 
         Returns:
             准备好的预测数据
         """
         try:
-            # 获取当前日期的数据
-            daily_data = data_handler.get_daily_data(current_date)
+            # 获取前一个交易日的日期（用于预测当前日期，避免未来函数）
+            prediction_date = data_handler.get_previous_trading_date(current_date, n=1)
+
+            if prediction_date is None:
+                print(f"{current_date}: 没有前一个交易日的数据，无法进行预测")
+                return None
+
+            # 获取前一个交易日的数据
+            daily_data = data_handler.get_daily_data(prediction_date)
 
             if daily_data is None or len(daily_data) == 0:
                 return None
@@ -285,17 +298,17 @@ class MLStrategy(BaseStrategy):
                 print(f"警告: 以下因子列不存在: {missing_factors}")
                 return None
 
-            # 复制数据，避免修改原始数据
+            # 复制数据, 避免修改原始数据
             pred_data = daily_data.copy()
 
             # 过滤掉 close 为 NaN 的股票
             pred_data = pred_data[~pred_data['close'].isna()]
 
             if len(pred_data) == 0:
-                print(f"{current_date}: 所有股票的 close 价格都为 NaN")
+                print(f"{current_date} (使用{prediction_date}的数据): 所有股票的 close 价格都为 NaN")
                 return None
 
-            # 截面标准化（Cross Sectional Z-Score Normalization）
+            # 截面标准化 (Cross Sectional Z-Score Normalization)
             pred_data = self.normalizer(pred_data, self.factors)
 
             # 填充缺失值为 0
@@ -318,7 +331,7 @@ class MLStrategy(BaseStrategy):
             pred_data: 预测数据
 
         Returns:
-            选中的股票列表，每个元素为 {code: str, score: float, weight: float}
+            选中的股票列表, 每个元素为 {code: str, score: float, weight: float}
         """
         top_k = self.params['top_k']
         min_score = self.params['min_score']
@@ -390,15 +403,15 @@ class MLStrategy(BaseStrategy):
                         entry_date = self.position_entries[code]['entry_date']
                         days_held = (current_date - entry_date).days
                         if days_held < self.params['hold_days']:
-                            # 未达到最小持有天数，继续持有
+                            # 未达到最小持有天数, 继续持有
                             continue
 
                 # 获取当前价格
                 price = self._get_current_price(data_handler, current_date, code)
 
-                # 如果价格获取失败，跳过该股票
+                # 如果价格获取失败, 跳过该股票
                 if price is None:
-                    print(f"{current_date}: 跳过卖出 {code}，无法获取价格")
+                    print(f"{current_date}: 跳过卖出 {code}, 无法获取价格")
                     continue
 
                 # 生成卖出信号
@@ -421,16 +434,16 @@ class MLStrategy(BaseStrategy):
             code = stock['code']
             target_weight = stock['weight']
 
-            # 如果已经持有，不重复买入
+            # 如果已经持有, 不重复买入
             if code in current_positions:
                 continue
 
             # 获取当前价格
             price = self._get_current_price(data_handler, current_date, code)
 
-            # 如果价格获取失败，跳过该股票
+            # 如果价格获取失败, 跳过该股票
             if price is None:
-                print(f"{current_date}: 跳过买入 {code}，无法获取价格")
+                print(f"{current_date}: 跳过买入 {code}, 无法获取价格")
                 continue
 
             # 生成买入信号
@@ -462,7 +475,7 @@ class MLStrategy(BaseStrategy):
             code: 股票代码
 
         Returns:
-            当前价格，如果获取失败返回 None
+            当前价格, 如果获取失败返回 None
         """
         try:
             stock_data = data_handler.get_data_before(code, current_date)
@@ -500,7 +513,7 @@ class MLStrategy(BaseStrategy):
         # 获取当前持仓
         current_positions = portfolio.positions
 
-        # 遍历所有持仓，检查是否需要止损
+        # 遍历所有持仓, 检查是否需要止损
         for code, position in current_positions.items():
             # 检查是否有买入记录
             if code not in self.position_entries:
@@ -534,7 +547,7 @@ class MLStrategy(BaseStrategy):
                 # 清除持仓记录
                 del self.position_entries[code]
 
-                print(f"{current_date}: 止损卖出 {code}，买入价={entry_price:.2f}, "
+                print(f"{current_date}: 止损卖出 {code}, 买入价={entry_price:.2f}, "
                       f"当前价={current_price:.2f}, 亏损={return_rate*100:.2f}%")
 
         return signals
@@ -545,5 +558,181 @@ class MLStrategy(BaseStrategy):
         self.last_rebalance_date = None
         self.trading_days_count = 0
         self.position_entries = {}
-        if hasattr(self, 'last_rebalance_day_count'):
-            delattr(self, 'last_rebalance_day_count')
+
+    def initialize_for_live_trading(self,
+                                   data_handler,
+                                   strategy_start_date: date) -> None:
+        """
+        初始化实盘交易模式
+
+        Args:
+            data_handler: 数据处理器对象
+            strategy_start_date: 策略开始运行的日期
+        """
+        self.strategy_start_date = strategy_start_date
+
+        # 获取交易日历
+        # 从策略开始日期到当前可用的所有交易日
+        all_dates = data_handler.get_available_dates(
+            start_date=strategy_start_date,
+            end_date=date.today()
+        )
+
+        if not all_dates:
+            raise ValueError(f"无法获取从 {strategy_start_date} 开始的交易日历")
+
+        # 过滤并排序交易日历
+        self.trading_dates = sorted([d for d in all_dates if d >= strategy_start_date])
+
+        print(f"✓ 实盘模式初始化完成:")
+        print(f"  - 策略开始日期: {strategy_start_date}")
+        print(f"  - 交易日历数量: {len(self.trading_dates)} 个交易日")
+        print(f"  - 交易日期范围: {self.trading_dates[0]} 至 {self.trading_dates[-1]}")
+
+    def is_rebalance_day(self, current_date: date) -> bool:
+        """
+        判断给定日期是否为调仓日（实盘模式）
+
+        Args:
+            current_date: 当前日期
+
+        Returns:
+            是否为调仓日
+        """
+        if not self.trading_dates:
+            # 如果没有初始化交易日历，使用回测模式的逻辑
+            return self._is_rebalance_day(current_date)
+
+        # 检查当前日期是否在交易日历中
+        if current_date not in self.trading_dates:
+            return False
+
+        # 找到当前日期在交易日历中的索引
+        try:
+            current_index = self.trading_dates.index(current_date)
+        except ValueError:
+            return False
+
+        # 计算从策略开始到当前日期的交易日数量
+        trading_days_since_start = current_index + 1  # 索引从0开始，所以+1
+
+        rebalance_days = self.params['rebalance_days']
+
+        # 判断是否是调仓日
+        # 例如：rebalance_days=5，则第1, 6, 11, 16...个交易日是调仓日
+        if trading_days_since_start % rebalance_days == 1:
+            return True
+
+        return False
+
+    def get_next_rebalance_date(self, current_date: date) -> Optional[date]:
+        """
+        获取下一个调仓日（实盘模式）
+
+        Args:
+            current_date: 当前日期
+
+        Returns:
+            下一个调仓日，如果不存在返回None
+        """
+        if not self.trading_dates:
+            return None
+
+        # 找到当前日期之后的交易日
+        future_dates = [d for d in self.trading_dates if d > current_date]
+
+        if not future_dates:
+            return None
+
+        rebalance_days = self.params['rebalance_days']
+
+        # 获取当前日期的索引（如果不在交易日历中，找到最近的）
+        try:
+            current_index = self.trading_dates.index(current_date)
+        except ValueError:
+            # 找到第一个大于当前日期的索引
+            for i, d in enumerate(self.trading_dates):
+                if d > current_date:
+                    current_index = i - 1
+                    break
+            else:
+                current_index = len(self.trading_dates) - 1
+
+        # 找下一个调仓日
+        # 当前索引之后的每个 (rebalance_days - 1) 的倍数位置
+        offset = rebalance_days - (current_index + 1) % rebalance_days
+        if offset == rebalance_days:
+            offset = 0
+
+        next_index = current_index + offset
+        if offset == 0:
+            next_index += rebalance_days
+
+        if next_index < len(self.trading_dates):
+            return self.trading_dates[next_index]
+
+        return None
+
+    def get_rebalance_info(self, current_date: date) -> Dict:
+        """
+        获取当前日期的调仓信息
+
+        Args:
+            current_date: 当前日期
+
+        Returns:
+            调仓信息字典:
+            {
+                'is_trading_day': bool,           # 是否为交易日
+                'is_rebalance_day': bool,         # 是否为调仓日
+                'days_since_start': int,          # 距离策略开始的交易日数
+                'days_until_next_rebalance': int, # 距离下次调仓的交易日数
+                'next_rebalance_date': date,      # 下次调仓日期
+                'last_rebalance_date': date,      # 上次调仓日期
+            }
+        """
+        info = {
+            'is_trading_day': False,
+            'is_rebalance_day': False,
+            'days_since_start': 0,
+            'days_until_next_rebalance': 0,
+            'next_rebalance_date': None,
+            'last_rebalance_date': None,
+        }
+
+        if not self.trading_dates:
+            return info
+
+        # 检查是否为交易日
+        is_trading_day = current_date in self.trading_dates
+        info['is_trading_day'] = is_trading_day
+
+        if not is_trading_day:
+            return info
+
+        # 获取索引
+        current_index = self.trading_dates.index(current_date)
+        info['days_since_start'] = current_index + 1
+
+        # 检查是否为调仓日
+        info['is_rebalance_day'] = self.is_rebalance_day(current_date)
+
+        # 计算上次调仓日
+        rebalance_days = self.params['rebalance_days']
+        if current_index >= rebalance_days - 1:
+            last_index = current_index - (current_index % rebalance_days)
+            if last_index >= 0:
+                info['last_rebalance_date'] = self.trading_dates[last_index]
+
+        # 计算下次调仓日
+        next_rebalance = self.get_next_rebalance_date(current_date)
+        info['next_rebalance_date'] = next_rebalance
+
+        if next_rebalance:
+            try:
+                next_index = self.trading_dates.index(next_rebalance)
+                info['days_until_next_rebalance'] = next_index - current_index
+            except ValueError:
+                pass
+
+        return info
