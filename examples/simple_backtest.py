@@ -38,12 +38,13 @@ def main():
 
     try:
         # 数据加载范围（应该包含回测范围）
-        data_load_start = "2024-01-02"  # 数据开始日期
+        data_load_start = "2023-01-02"  # 数据开始日期
         data_load_end = "2025-12-31"    # 数据结束日期
 
         # 回测范围
-        backtest_start = "2024-01-03"
+        backtest_start = "2024-01-02"
         backtest_end = "2025-12-31"
+        # backtest_end = "2024-02-01"
 
         print(f"数据加载范围: {data_load_start} 至 {data_load_end}")
         print(f"回测范围: {backtest_start} 至 {backtest_end}")
@@ -62,26 +63,49 @@ def main():
 
     print()
 
-    # ==================== 第2步：创建策略 ====================
-    print("第2步：创建策略...")
+    # ==================== 第2步：加载benchmark数据（沪深300）====================
+    print("第2步：加载benchmark数据（沪深300）...")
+    benchmark_data = None
+    try:
+        benchmark_data = data_handler.load_index_data(
+            index_path="../data/index/day/sh000300.csv",
+            start_date=data_load_start,
+            end_date=data_load_end
+        )
+        print(f"Benchmark数据加载成功！")
+        print(f"  - 日期范围: {benchmark_data['date'].iloc[0]} 至 {benchmark_data['date'].iloc[-1]}")
+        print(f"  - 数据点数: {len(benchmark_data)}")
+    except FileNotFoundError as e:
+        print(f"警告：{e}")
+        print("将不使用benchmark进行对比")
+    except Exception as e:
+        print(f"警告：加载benchmark数据时出错：{e}")
+        print("将不使用benchmark进行对比")
+    print()
+
+    # ==================== 第3步：创建策略 ====================
+    print("第3步：创建策略...")
     strategy = MLStrategy({
         'model_path': '../examples/lightgbm_model.pkl',
-        'rebalance_days': 7,
-        'top_k': 10,
-        'stop_loss': 0.03,
+        # 'model_path': '../examples/examples/pipeline_outputs/pipeline_20260131_154340/model.pkl',
+
+        'rebalance_days': 3,
+        'top_k': 20,
+        'stop_loss': 0.01,
     })
     print(f"策略名称: {strategy.name}")
     print(f"策略参数: {strategy.params}")
     print()
 
-    # ==================== 第3步：运行回测 ====================
-    print("第3步：运行回测...")
+    # ==================== 第4步：运行回测 ====================
+    print("第4步：运行回测...")
     engine = BacktestEngine(
         data_handler=data_handler,
         strategy=strategy,
         initial_capital=1000000,  # 初始资金100万
         max_single_position_ratio=1.0,  # 单只股票最大仓位比例100%
-        transaction_cost=StandardCost()  # 使用标准交易成本
+        transaction_cost=StandardCost(),  # 使用标准交易成本
+        benchmark_data=benchmark_data  # 添加benchmark数据
     )
 
     # 运行回测
@@ -91,8 +115,8 @@ def main():
         verbose=True
     )
 
-    # ==================== 第4步：绩效分析 ====================
-    print("第4步：计算绩效指标...")
+    # ==================== 第5步：绩效分析 ====================
+    print("第5步：计算绩效指标...")
     metrics = calculate_all_metrics(
         portfolio_history=results['portfolio_history'],
         trades=results['trades'],
@@ -107,7 +131,7 @@ def main():
     )
     print("\n" + report)
 
-    # ==================== 第5步：生成图表和CSV报告（可选）====================
+    # ==================== 第6步：生成图表和CSV报告（可选）====================
     try:
         print("生成报告和图表...")
         from quant_framework.performance.reports import ReportGenerator
@@ -148,6 +172,7 @@ def main():
         print("绘制资金曲线...")
         report_gen.plot_equity_curve(
             portfolio_history=results['portfolio_history'],
+            benchmark_history=results.get('benchmark_history'),  # 传递benchmark数据
             save=True,
             show=False
         )

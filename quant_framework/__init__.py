@@ -14,7 +14,8 @@ from .portfolio.portfolio import Portfolio
 from .execution.transaction_cost import TransactionCost, StandardCost
 from .backtest.engine import BacktestEngine
 from .performance.analyzer import Performance, calculate_all_metrics
-from .realtime.signal_generator import RealTimeSignalGenerator
+from .realtime.data_updater import DataUpdater
+from .realtime.live_trader import LiveTrader
 from .utils.config import Config, load_config
 from .factor import (
     BaseFactor,
@@ -23,6 +24,7 @@ from .factor import (
     Alpha158
 )
 from .model import LGBModel
+from .pipeline import MLPipeline
 
 __all__ = [
     'DataHandler',
@@ -31,7 +33,6 @@ __all__ = [
     'SimpleMAStrategy',
     'DoubleMAStrategy',
     'MultiMAStrategy',
-    'OrderlyFactorStrategy',
     'MLStrategy',
     'Portfolio',
     'TransactionCost',
@@ -39,7 +40,8 @@ __all__ = [
     'BacktestEngine',
     'Performance',
     'calculate_all_metrics',
-    'RealTimeSignalGenerator',
+    'DataUpdater',
+    'LiveTrader',
     'Config',
     'load_config',
     'BaseFactor',
@@ -47,5 +49,6 @@ __all__ = [
     'MultiFactorAnalysis',
     'Alpha158',
     'LGBModel',
+    'MLPipeline',
 ]
 

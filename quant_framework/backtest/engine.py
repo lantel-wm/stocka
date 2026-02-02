@@ -24,7 +24,8 @@ class BacktestEngine:
                  strategy: BaseStrategy,
                  initial_capital: float = 1000000.0,
                  max_single_position_ratio: float = 0.3,
-                 transaction_cost: Optional[TransactionCost] = None):
+                 transaction_cost: Optional[TransactionCost] = None,
+                 benchmark_data: Optional[pd.DataFrame] = None):
         """
         初始化回测引擎
 
@@ -32,12 +33,15 @@ class BacktestEngine:
             data_handler: 数据处理器
             strategy: 交易策略
             initial_capital: 初始资金
+            max_single_position_ratio: 单只股票最大仓位比例
             transaction_cost: 交易成本模型（可选）
+            benchmark_data: benchmark数据（DataFrame，需包含date和close列）
         """
         self.data_handler = data_handler
         self.strategy = strategy
         self.initial_capital = initial_capital
         self.transaction_cost = transaction_cost or TransactionCost()
+        self.benchmark_data = benchmark_data
 
         # 初始化投资组合
         self.portfolio = Portfolio(
@@ -329,6 +333,57 @@ class BacktestEngine:
             'trade_details': completed_trades
         }
 
+    def _calculate_benchmark_returns(self, df_history: pd.DataFrame) -> pd.DataFrame:
+        """
+        计算benchmark的收益曲线
+
+        Args:
+            df_history: 投资组合历史数据
+
+        Returns:
+            包含benchmark收益的DataFrame
+        """
+        if self.benchmark_data is None or len(self.benchmark_data) == 0:
+            return None
+
+        # 获取回测期间的日期范围
+        df_history['date'] = pd.to_datetime(df_history['date'])
+        start_date = df_history['date'].min()
+        end_date = df_history['date'].max()
+
+        # 过滤benchmark数据到回测期间
+        benchmark_filtered = self.benchmark_data[
+            (self.benchmark_data['date'] >= start_date) &
+            (self.benchmark_data['date'] <= end_date)
+        ].copy()
+
+        if len(benchmark_filtered) == 0:
+            return None
+
+        # 获取初始收盘价
+        initial_close = benchmark_filtered['close'].iloc[0]
+
+        # 计算累计收益率（基于初始资金）
+        benchmark_filtered['benchmark_value'] = self.initial_capital * (
+            benchmark_filtered['close'] / initial_close
+        )
+
+        # 将benchmark数据与投资组合日期对齐
+        result = df_history[['date', 'total_value']].copy()
+        result = result.merge(
+            benchmark_filtered[['date', 'benchmark_value']],
+            on='date',
+            how='left'
+        )
+
+        # 前向填充benchmark值（处理交易日不匹配的情况）
+        result['benchmark_value'] = result['benchmark_value'].ffill()
+
+        # 计算benchmark收益率
+        result['benchmark_returns'] = result['benchmark_value'].pct_change()
+
+        return result
+
     def _generate_results(self) -> Dict:
         """生成回测结果"""
         daily_history = self.portfolio.get_daily_history()
@@ -353,6 +408,11 @@ class BacktestEngine:
         # 分析完整交易（买入-卖出配对）
         trade_analysis = self._analyze_trades()
 
+        # 计算benchmark收益
+        benchmark_history = None
+        if self.benchmark_data is not None:
+            benchmark_history = self._calculate_benchmark_returns(df_history)
+
         return {
             'initial_capital': initial_value,
             'final_value': final_value,
@@ -365,7 +425,9 @@ class BacktestEngine:
             'strategy_params': self.strategy.params,
             'portfolio': self.portfolio,
             # 新增交易统计
-            'trade_analysis': trade_analysis
+            'trade_analysis': trade_analysis,
+            # 新增benchmark数据
+            'benchmark_history': benchmark_history
         }
 
     def get_results(self) -> Dict:

@@ -79,6 +79,7 @@ class ReportGenerator:
 
     def plot_equity_curve(self,
                          portfolio_history: List[Dict],
+                         benchmark_history: Optional[pd.DataFrame] = None,
                          save: bool = True,
                          show: bool = False) -> Optional[str]:
         """
@@ -86,6 +87,7 @@ class ReportGenerator:
 
         Args:
             portfolio_history: 每日历史记录
+            benchmark_history: benchmark历史数据（可选，DataFrame需包含date和benchmark_value列）
             save: 是否保存图片
             show: 是否显示图片
 
@@ -103,10 +105,15 @@ class ReportGenerator:
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
 
         # 绘制资金曲线
-        ax1.plot(df['date'], df['total_value'], 'b-', linewidth=2, label='Total Assets')
+        ax1.plot(df['date'], df['total_value'], 'b-', linewidth=2, label='Portfolio')
         ax1.axhline(y=df['total_value'].iloc[0],
-                   color='r', linestyle='--',
+                   color='gray', linestyle='--',
                    label=f"Initial Capital: {df['total_value'].iloc[0]:,.0f}")
+
+        # 如果有benchmark数据，绘制benchmark曲线
+        if benchmark_history is not None and 'benchmark_value' in benchmark_history.columns:
+            ax1.plot(benchmark_history['date'], benchmark_history['benchmark_value'],
+                    'r-', linewidth=2, label='Benchmark (CSI 300)', alpha=0.7)
 
         ax1.set_title('Equity Curve', fontsize=14, fontweight='bold')
         ax1.set_ylabel('Assets (CNY)', fontsize=12)
