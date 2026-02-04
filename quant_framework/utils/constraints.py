@@ -3,9 +3,13 @@
 处理A股的各种交易限制（涨跌停、停牌、T+1等）
 """
 
-from datetime import date
-from typing import Optional
+from datetime import date, datetime
+from typing import Optional, List
+from pathlib import Path
 import pandas as pd
+from .logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class TradingConstraints:
@@ -308,12 +312,210 @@ class LiquidityChecker:
 
 
 class TradingCalendar:
-    """交易日历"""
+    """
+    交易日历类
+
+    提供A股交易日历的查询功能，自动从 akshare 获取并缓存交易日历数据
+    """
+
+    # 默认缓存文件路径（项目根目录下的 data/calendar）
+    DEFAULT_CACHE_DIR = Path(__file__).parent.parent.parent / 'data' / 'calendar'
+    CACHE_FILE = DEFAULT_CACHE_DIR / 'trading_calendar.csv'
+
+    def __init__(self, cache_dir: Optional[Path] = None):
+        """
+        初始化交易日历
+
+        Args:
+            cache_dir: 缓存目录，默认为项目根目录/data/calendar
+        """
+        self.cache_dir = cache_dir or self.DEFAULT_CACHE_DIR
+        self.cache_file = self.cache_dir / 'trading_calendar.csv'
+        self._trading_days_df = None
+        self._trading_days = None
+
+        # 确保缓存目录存在
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+
+        # 尝试加载缓存的交易日历
+        self._load_cached_calendar()
+
+    def _load_cached_calendar(self) -> None:
+        """从缓存文件加载交易日历"""
+        if self.cache_file.exists():
+            try:
+                self._trading_days_df = pd.read_csv(self.cache_file)
+                # 转换为 datetime
+                self._trading_days = pd.to_datetime(self._trading_days_df.iloc[:, 0])
+                logger.info(f"✓ 已加载缓存的交易日历（{len(self._trading_days)} 个交易日）")
+                logger.info(f"  范围: {self._trading_days[0].date()} 至 {self._trading_days[-1].date()}")
+            except Exception as e:
+                logger.warning(f"加载缓存失败: {e}")
+                self._trading_days_df = None
+                self._trading_days = None
+
+    def _save_cached_calendar(self, df: pd.DataFrame) -> None:
+        """保存交易日历到缓存文件"""
+        try:
+            df.to_csv(self.cache_file, index=False, encoding='utf-8')
+            logger.info(f"✓ 交易日历已缓存到: {self.cache_file}")
+        except Exception as e:
+            logger.warning(f"保存缓存失败: {e}")
+
+    def _fetch_calendar_from_akshare(self) -> pd.DatetimeIndex:
+        """
+        从 akshare 获取交易日历
+
+        Returns:
+            交易日的 DatetimeIndex
+        """
+        try:
+            import akshare as ak
+
+            logger.info(f"正在从 akshare 获取交易日历...")
+
+            # 获取交易日历
+            df = ak.tool_trade_date_hist_sina()
+
+            if df is not None and len(df) > 0:
+                # 保存原始 DataFrame 到缓存
+                self._save_cached_calendar(df)
+
+                # 提取交易日期
+                if 'trade_date' in df.columns:
+                    trading_days_str = df['trade_date'].tolist()
+                else:
+                    # 尝试第一列
+                    trading_days_str = df.iloc[:, 0].tolist()
+
+                # 转换为 datetime
+                trading_days = pd.to_datetime(trading_days_str)
+
+                # 排序
+                trading_days = trading_days.sort_values()
+
+                self._trading_days_df = df
+                self._trading_days = trading_days
+
+                logger.info(f"✓ 成功获取 {len(trading_days)} 个交易日")
+                logger.info(f"  范围: {trading_days[0].date()} 至 {trading_days[-1].date()}")
+
+                return trading_days
+            else:
+                logger.error("获取交易日历失败：返回数据为空")
+                return None
+
+        except ImportError:
+            logger.error("需要安装 akshare 库（pip install akshare）")
+            return None
+        except Exception as e:
+            logger.error(f"获取交易日历失败: {e}")
+            return None
+
+    def get_trading_days(self, force_refresh: bool = False) -> pd.DatetimeIndex:
+        """
+        获取交易日列表
+
+        Args:
+            force_refresh: 是否强制刷新（忽略缓存）
+
+        Returns:
+            交易日的 DatetimeIndex
+        """
+        # 如果有缓存且不强制刷新，直接返回
+        if self._trading_days is not None and not force_refresh:
+            return self._trading_days
+
+        # 从 akshare 获取
+        trading_days = self._fetch_calendar_from_akshare()
+
+        if trading_days is None:
+            logger.error("无法获取交易日历")
+            return pd.DatetimeIndex([])
+
+        return trading_days
+
+    def is_trading_day(self, check_date: date) -> bool:
+        """
+        判断指定日期是否为交易日
+
+        Args:
+            check_date: 要检查的日期
+
+        Returns:
+            是否为交易日
+        """
+        # 确保 _trading_days 已加载
+        if self._trading_days is None:
+            self.get_trading_days()
+
+        if self._trading_days is None or len(self._trading_days) == 0:
+            logger.warning("交易日历为空，无法判断")
+            return False
+
+        # 转换为 datetime 进行比较
+        check_dt = pd.Timestamp(check_date)
+
+        return check_dt in self._trading_days
+
+    def get_previous_trading_day(self, check_date: date) -> Optional[date]:
+        """
+        获取指定日期之前的最近交易日
+
+        Args:
+            check_date: 基准日期
+
+        Returns:
+            最近的交易日日期，如果找不到返回 None
+        """
+        # 确保 _trading_days 已加载
+        if self._trading_days is None:
+            self.get_trading_days()
+
+        if self._trading_days is None or len(self._trading_days) == 0:
+            return None
+
+        check_dt = pd.Timestamp(check_date)
+
+        # 获取之前的所有交易日
+        previous_days = self._trading_days[self._trading_days < check_dt]
+
+        if len(previous_days) > 0:
+            return previous_days[-1].date()
+        else:
+            return None
+
+    def get_next_trading_day(self, check_date: date) -> Optional[date]:
+        """
+        获取指定日期之后的最近交易日
+
+        Args:
+            check_date: 基准日期
+
+        Returns:
+            最近的交易日日期，如果找不到返回 None
+        """
+        # 确保 _trading_days 已加载
+        if self._trading_days is None:
+            self.get_trading_days()
+
+        if self._trading_days is None or len(self._trading_days) == 0:
+            return None
+
+        check_dt = pd.Timestamp(check_date)
+
+        # 获取之后的所有交易日
+        next_days = self._trading_days[self._trading_days > check_dt]
+
+        if len(next_days) > 0:
+            return next_days[0].date()
+        else:
+            return None
 
     @staticmethod
-    def is_trading_day(trade_date: date, trading_days: list) -> bool:
+    def is_trading_day_simple(trade_date: date, trading_days: list) -> bool:
         """
-        判断是否为交易日
+        判断是否为交易日（简单版本，需要手动提供交易日列表）
 
         Args:
             trade_date: 日期
