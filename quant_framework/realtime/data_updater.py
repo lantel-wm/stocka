@@ -67,6 +67,42 @@ class DataUpdater:
         logger.info(f"  - 文件格式: {'Parquet' if use_parquet else 'CSV'}")
         logger.info(f"  - 请求间隔: {delay} 秒")
 
+    @staticmethod
+    def get_appropriate_end_date(target_date: Optional[date] = None) -> date:
+        """
+        根据当前时间判断应该使用的结束日期
+
+        时间判断逻辑：
+        - A股市场在每个交易日 15:00 收盘
+        - 当天的历史行情数据需要在收盘后才能从数据源获取
+        - 设置 16:00 为分界点是为了增加鲁棒性，给数据源留出1小时缓冲时间
+        - 如果当前时间 < 16:00，说明今天的数据还未完全更新，使用前一天的数据
+        - 如果当前时间 >= 16:00，说明今天的数据应该已经可以获取，使用当天的数据
+
+        Args:
+            target_date: 目标日期（默认为今天）
+
+        Returns:
+            应该使用的结束日期
+        """
+        if target_date is None:
+            target_date = date.today()
+
+        # 获取当前时间
+        now = datetime.now()
+
+        # 16:00 为分界点
+        # - 16:00 之前：使用前一天数据（因为今天数据还未更新）
+        # - 16:00 之后：使用当天数据（收盘后数据应该已更新）
+        if now.hour < 16:
+            appropriate_date = target_date - timedelta(days=1)
+            logger.info(f"当前时间 {now.strftime('%H:%M')} < 16:00，使用前一天数据: {appropriate_date}")
+        else:
+            appropriate_date = target_date
+            logger.info(f"当前时间 {now.strftime('%H:%M')} >= 16:00，使用当天数据: {appropriate_date}")
+
+        return appropriate_date
+
     def update_stock_data(self,
                          stock_code: str,
                          end_date: Optional[str] = None) -> Dict:
@@ -76,6 +112,9 @@ class DataUpdater:
         Args:
             stock_code: 股票代码（如 "600000" 或 "000001"）
             end_date: 结束日期（格式：YYYYMMDD，默认为今天）
+                      如果为今天，会根据当前时间自动判断：
+                      - 16:00 之前使用前一天
+                      - 16:00 之后使用当天
 
         Returns:
             更新结果字典：
@@ -92,9 +131,21 @@ class DataUpdater:
         # 格式化股票代码
         stock_code = str(stock_code).strip()
 
-        # 设置结束日期
+        # 设置结束日期（根据时间自动判断）
         if end_date is None:
-            end_date = date.today().strftime('%Y%m%d')
+            appropriate_date = self.get_appropriate_end_date()
+            end_date = appropriate_date.strftime('%Y%m%d')
+        else:
+            # 检查传入的日期是否是今天或未来日期
+            try:
+                input_date = datetime.strptime(end_date, '%Y%m%d').date()
+                today = date.today()
+                if input_date >= today:
+                    # 如果是今天或未来日期，使用时间判断逻辑
+                    appropriate_date = self.get_appropriate_end_date(input_date)
+                    end_date = appropriate_date.strftime('%Y%m%d')
+            except ValueError:
+                pass  # 日期格式错误，让后续逻辑处理
 
         result = {
             'stock_code': stock_code,
@@ -123,6 +174,7 @@ class DataUpdater:
                 if start_date > end_date:
                     result['status'] = 'skipped'
                     result['message'] = f'数据已是最新（最新日期：{existing_end}）'
+                    logger.info(f"⊘ {stock_code}: 跳过（数据已是最新，最新日期：{existing_end}）")
                     return result
             else:
                 # 如果没有现有数据，下载全部历史数据（限制从2005年开始）
@@ -134,6 +186,7 @@ class DataUpdater:
             if downloaded_data is None or len(downloaded_data) == 0:
                 result['status'] = 'skipped'
                 result['message'] = f'没有新数据需要下载（{start_date} 至 {end_date}）'
+                logger.info(f"⊘ {stock_code}: 跳过（{start_date} 至 {end_date} 暂无数据）")
                 return result
 
             # 更新结果中的下载范围
@@ -153,9 +206,6 @@ class DataUpdater:
                 # 直接保存新数据
                 combined_data = downloaded_data
 
-            # print(downloaded_data)
-            # exit(1)
-
             # 写入文件
             self._write_data_file(file_path, combined_data)
 
@@ -164,7 +214,6 @@ class DataUpdater:
             result['total_rows'] = len(combined_data)
 
             logger.info(f"✓ {stock_code}: 更新成功 ({downloaded_start} 至 {downloaded_end}, +{len(downloaded_data)} 条)")
-            # exit(1)
 
         except Exception as e:
             result['status'] = 'error'
@@ -183,6 +232,9 @@ class DataUpdater:
         Args:
             stock_codes: 股票代码列表
             end_date: 结束日期（格式：YYYYMMDD，默认为今天）
+                      如果为今天，会根据当前时间自动判断：
+                      - 16:00 之前使用前一天
+                      - 16:00 之后使用当天
             delay: 请求间隔时间（秒），默认使用初始化时的 delay
 
         Returns:
@@ -198,6 +250,22 @@ class DataUpdater:
         if delay is None:
             delay = self.delay
 
+        # 如果 end_date 为空或为今天，根据当前时间判断应该使用的日期
+        if end_date is None:
+            appropriate_date = self.get_appropriate_end_date()
+            end_date = appropriate_date.strftime('%Y%m%d')
+        else:
+            # 检查传入的日期是否是今天
+            try:
+                input_date = datetime.strptime(end_date, '%Y%m%d').date()
+                today = date.today()
+                if input_date >= today:
+                    # 如果是今天或未来日期，使用时间判断逻辑
+                    appropriate_date = self.get_appropriate_end_date(input_date)
+                    end_date = appropriate_date.strftime('%Y%m%d')
+            except ValueError:
+                pass  # 日期格式错误，让后续逻辑处理
+
         results = {
             'total': len(stock_codes),
             'success': 0,
@@ -209,7 +277,7 @@ class DataUpdater:
         logger.info(f"\n开始批量更新 {len(stock_codes)} 只股票...")
 
         for i, stock_code in enumerate(stock_codes):
-            logger.info(f"\n[{i+1}/{len(stock_codes)}] 更新 {stock_code}...")
+            logger.info(f"[{i+1}/{len(stock_codes)}] 更新 {stock_code}...")
 
             result = self.update_stock_data(stock_code, end_date)
             results['details'].append(result)
@@ -239,14 +307,30 @@ class DataUpdater:
         Args:
             index_code: 指数代码（如 "sh000300" 沪深300, "sz399006" 创业板指）
             end_date: 结束日期（格式：YYYYMMDD，默认为今天）
+                      如果为今天，会根据当前时间自动判断：
+                      - 16:00 之前使用前一天
+                      - 16:00 之后使用当天
 
         Returns:
             更新结果字典（格式同 update_stock_data）
         """
         index_code = str(index_code).strip().lower()
 
+        # 设置结束日期（根据时间自动判断）
         if end_date is None:
-            end_date = date.today().strftime('%Y%m%d')
+            appropriate_date = self.get_appropriate_end_date()
+            end_date = appropriate_date.strftime('%Y%m%d')
+        else:
+            # 检查传入的日期是否是今天或未来日期
+            try:
+                input_date = datetime.strptime(end_date, '%Y%m%d').date()
+                today = date.today()
+                if input_date >= today:
+                    # 如果是今天或未来日期，使用时间判断逻辑
+                    appropriate_date = self.get_appropriate_end_date(input_date)
+                    end_date = appropriate_date.strftime('%Y%m%d')
+            except ValueError:
+                pass  # 日期格式错误，让后续逻辑处理
 
         result = {
             'stock_code': index_code,
@@ -272,16 +356,18 @@ class DataUpdater:
                 if start_date > end_date:
                     result['status'] = 'skipped'
                     result['message'] = f'数据已是最新（最新日期：{existing_end}）'
+                    logger.info(f"⊘ {index_code}: 跳过（数据已是最新，最新日期：{existing_end}）")
                     return result
             else:
                 start_date = '20100101'
 
             # 下载指数数据
-            downloaded_data = self._fetch_index_data_from_api(index_code, start_date, end_date)
+            downloaded_data = self._fetch_index_data_from_api(index_code, start_date, start_date)
 
             if downloaded_data is None or len(downloaded_data) == 0:
                 result['status'] = 'skipped'
                 result['message'] = f'没有新数据需要下载（{start_date} 至 {end_date}）'
+                logger.info(f"⊘ {index_code}: 跳过（{start_date} 至 {end_date} 暂无数据）")
                 return result
 
             downloaded_start = downloaded_data['date'].min().strftime('%Y-%m-%d')
@@ -409,6 +495,7 @@ class DataUpdater:
 
             # 获取股票历史数据
             prefix = 'sh' if stock_code.startswith('6') else 'sz'
+            logger.info(f"symbol={prefix}{stock_code}, start_date={start_date}, end_date={end_date}")
             df = ak.stock_zh_a_daily(
                 symbol=f"{prefix}{stock_code}",
                 start_date=start_date,
