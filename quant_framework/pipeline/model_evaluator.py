@@ -12,6 +12,9 @@ from scipy.stats import spearmanr
 
 from ..data.data_handler import DataHandler
 from ..model.lgb_model import LGBModel
+from ..utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def str_to_date(date_str: str) -> date:
@@ -50,7 +53,7 @@ class ModelEvaluator:
         Returns:
             包含预测值和真实值的DataFrame
         """
-        print("\n开始模型预测...")
+        logger.info("开始模型预测...")
 
         # 使用 test_loader 加载数据（已经计算好标签）
         test_data = test_loader.load()
@@ -76,7 +79,7 @@ class ModelEvaluator:
         # 转换为DataFrame
         self.predictions = pd.DataFrame(all_predictions)
 
-        print(f"  - 预测样本数: {len(self.predictions)}")
+        logger.info(f"  - 预测样本数: {len(self.predictions)}")
 
         return self.predictions
 
@@ -93,7 +96,7 @@ class ModelEvaluator:
         if self.predictions is None:
             self.predict()
 
-        print("\n计算IC指标...")
+        logger.info("计算IC指标...")
 
         if by_date:
             # 截面IC：每天计算一次IC
@@ -122,15 +125,15 @@ class ModelEvaluator:
                 'IC_IR': ic_ir,
             })
 
-            print(f"  - IC均值: {ic_mean:.4f}")
-            print(f"  - IC标准差: {ic_std:.4f}")
-            print(f"  - IC_IR: {ic_ir:.4f}")
+            logger.info(f"  - IC均值: {ic_mean:.4f}")
+            logger.info(f"  - IC标准差: {ic_std:.4f}")
+            logger.info(f"  - IC_IR: {ic_ir:.4f}")
 
         else:
             # 时序IC：整体计算
             ic = self.predictions['prediction'].corr(self.predictions['actual'])
             self.metrics['IC'] = ic
-            print(f"  - IC: {ic:.4f}")
+            logger.info(f"  - IC: {ic:.4f}")
 
         return self.metrics
 
@@ -144,7 +147,7 @@ class ModelEvaluator:
         if self.predictions is None:
             self.predict()
 
-        print("\n计算RankIC指标...")
+        logger.info("计算RankIC指标...")
 
         # 按日期计算RankIC
         daily_rank_ic = []
@@ -173,9 +176,9 @@ class ModelEvaluator:
             'RankIC_IR': rank_ic_ir,
         })
 
-        print(f"  - RankIC均值: {rank_ic_mean:.4f}")
-        print(f"  - RankIC标准差: {rank_ic_std:.4f}")
-        print(f"  - RankIC_IR: {rank_ic_ir:.4f}")
+        logger.info(f"  - RankIC均值: {rank_ic_mean:.4f}")
+        logger.info(f"  - RankIC标准差: {rank_ic_std:.4f}")
+        logger.info(f"  - RankIC_IR: {rank_ic_ir:.4f}")
 
         return self.metrics
 
@@ -215,7 +218,7 @@ class ModelEvaluator:
         with open(report_path, 'w', encoding='utf-8') as f:
             json.dump(self.metrics, f, indent=2, ensure_ascii=False)
 
-        print(f"\n✓ 评估报告已保存到: {report_path}")
+        logger.info(f"评估报告已保存到: {report_path}")
 
         return report_path
 

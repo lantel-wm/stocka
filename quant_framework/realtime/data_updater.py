@@ -10,6 +10,9 @@ from tenacity import retry, stop_after_attempt, wait_fixed
 from datetime import date, datetime, timedelta
 from typing import Optional, Dict, List
 from pathlib import Path
+from ..utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class DataUpdater:
@@ -59,10 +62,10 @@ class DataUpdater:
         # 确保输出目录存在
         Path(output_dir).mkdir(parents=True, exist_ok=True)
 
-        print(f"✓ 数据更新器初始化完成")
-        print(f"  - 输出目录: {output_dir}")
-        print(f"  - 文件格式: {'Parquet' if use_parquet else 'CSV'}")
-        print(f"  - 请求间隔: {delay} 秒")
+        logger.info(f"✓ 数据更新器初始化完成")
+        logger.info(f"  - 输出目录: {output_dir}")
+        logger.info(f"  - 文件格式: {'Parquet' if use_parquet else 'CSV'}")
+        logger.info(f"  - 请求间隔: {delay} 秒")
 
     def update_stock_data(self,
                          stock_code: str,
@@ -122,8 +125,8 @@ class DataUpdater:
                     result['message'] = f'数据已是最新（最新日期：{existing_end}）'
                     return result
             else:
-                # 如果没有现有数据，下载全部历史数据（限制从2010年开始）
-                start_date = '20100101'
+                # 如果没有现有数据，下载全部历史数据（限制从2005年开始）
+                start_date = '20050101'
 
             # 下载增量数据
             downloaded_data = self._fetch_stock_data_from_api(stock_code, start_date, end_date)
@@ -144,11 +147,14 @@ class DataUpdater:
                 # 读取现有数据并追加
                 existing_data = self._read_data_file(file_path)
                 combined_data = pd.concat([existing_data, downloaded_data], ignore_index=True)
-                combined_data = combined_data.drop_duplicates(subset=['code', 'date'], keep='last')
+                combined_data = combined_data.drop_duplicates(subset=['date'], keep='last')
                 combined_data = combined_data.sort_values('date').reset_index(drop=True)
             else:
                 # 直接保存新数据
                 combined_data = downloaded_data
+
+            # print(downloaded_data)
+            # exit(1)
 
             # 写入文件
             self._write_data_file(file_path, combined_data)
@@ -157,13 +163,13 @@ class DataUpdater:
             result['message'] = f'成功更新 {len(downloaded_data)} 条新数据'
             result['total_rows'] = len(combined_data)
 
-            print(f"✓ {stock_code}: 更新成功 ({downloaded_start} 至 {downloaded_end}, +{len(downloaded_data)} 条)")
-            exit(1)
+            logger.info(f"✓ {stock_code}: 更新成功 ({downloaded_start} 至 {downloaded_end}, +{len(downloaded_data)} 条)")
+            # exit(1)
 
         except Exception as e:
             result['status'] = 'error'
             result['message'] = f'更新失败: {str(e)}'
-            print(f"✗ {stock_code}: {result['message']}")
+            logger.error(f"✗ {stock_code}: {result['message']}")
 
         return result
 
@@ -200,10 +206,10 @@ class DataUpdater:
             'details': []
         }
 
-        print(f"\n开始批量更新 {len(stock_codes)} 只股票...")
+        logger.info(f"\n开始批量更新 {len(stock_codes)} 只股票...")
 
         for i, stock_code in enumerate(stock_codes):
-            print(f"\n[{i+1}/{len(stock_codes)}] 更新 {stock_code}...")
+            logger.info(f"\n[{i+1}/{len(stock_codes)}] 更新 {stock_code}...")
 
             result = self.update_stock_data(stock_code, end_date)
             results['details'].append(result)
@@ -216,15 +222,11 @@ class DataUpdater:
             else:
                 results['error'] += 1
 
-            # 请求间隔（最后一次不需要等待）
-            if i < len(stock_codes) - 1:
-                time.sleep(delay)
-
-        print(f"\n批量更新完成！")
-        print(f"  总计: {results['total']} 只")
-        print(f"  成功: {results['success']} 只")
-        print(f"  跳过: {results['skipped']} 只")
-        print(f"  失败: {results['error']} 只")
+        logger.info(f"\n批量更新完成！")
+        logger.info(f"  总计: {results['total']} 只")
+        logger.info(f"  成功: {results['success']} 只")
+        logger.info(f"  跳过: {results['skipped']} 只")
+        logger.info(f"  失败: {results['error']} 只")
 
         return results
 
@@ -302,12 +304,12 @@ class DataUpdater:
             result['message'] = f'成功更新 {len(downloaded_data)} 条新数据'
             result['total_rows'] = len(combined_data)
 
-            print(f"✓ {index_code}: 更新成功 ({downloaded_start} 至 {downloaded_end}, +{len(downloaded_data)} 条)")
+            logger.info(f"✓ {index_code}: 更新成功 ({downloaded_start} 至 {downloaded_end}, +{len(downloaded_data)} 条)")
 
         except Exception as e:
             result['status'] = 'error'
             result['message'] = f'更新失败: {str(e)}'
-            print(f"✗ {index_code}: {result['message']}")
+            logger.error(f"✗ {index_code}: {result['message']}")
 
         return result
 
@@ -337,7 +339,7 @@ class DataUpdater:
             return (start_date, end_date)
 
         except Exception as e:
-            print(f"读取文件日期范围失败 {file_path}: {e}")
+            logger.warning(f"读取文件日期范围失败 {file_path}: {e}")
             return (None, None)
 
     def _read_data_file(self, file_path: str) -> Optional[pd.DataFrame]:
@@ -356,10 +358,6 @@ class DataUpdater:
             else:
                 df = pd.read_csv(file_path, encoding='utf-8')
 
-            # 如果文件中是中文列名，转换为英文（使用 COLUMN_MAP）
-            if '日期' in df.columns:
-                df = df.rename(columns=self.COLUMN_MAP)
-
             # 确保日期格式
             if 'date' in df.columns:
                 df['date'] = pd.to_datetime(df['date'])
@@ -367,7 +365,7 @@ class DataUpdater:
             return df
 
         except Exception as e:
-            print(f"读取文件失败 {file_path}: {e}")
+            logger.warning(f"读取文件失败 {file_path}: {e}")
             return None
 
     def _write_data_file(self, file_path: str, df: pd.DataFrame) -> None:
@@ -379,14 +377,10 @@ class DataUpdater:
             df: 要保存的 DataFrame
         """
         try:
-            # 保存为 CSV 时使用中文列名（与原始数据格式一致）
+            # 始终使用英文表头保存
             if file_path.endswith('.csv'):
-                # 将英文列名转换回中文
-                reverse_map = {v: k for k, v in self.COLUMN_MAP.items()}
-                df_to_save = df.rename(columns=reverse_map)
-                df_to_save.to_csv(file_path, index=False, encoding='utf-8')
+                df.to_csv(file_path, index=False, encoding='utf-8')
             else:
-                # Parquet 保持英文列名
                 df.to_parquet(file_path, index=False)
         except Exception as e:
             raise IOError(f"写入文件失败 {file_path}: {e}")
@@ -411,38 +405,19 @@ class DataUpdater:
             import akshare as ak
 
             # 在调用 API 之前 sleep，防止触发使用限制
-            time.sleep(0.5)
-
-            print(f"  正在从 akshare 下载数据 ({start_date} 至 {end_date})...")
+            time.sleep(self.delay)
 
             # 获取股票历史数据
-            df = ak.stock_zh_a_hist(
-                symbol=stock_code,
-                period="daily",
+            prefix = 'sh' if stock_code.startswith('6') else 'sz'
+            df = ak.stock_zh_a_daily(
+                symbol=f"{prefix}{stock_code}",
                 start_date=start_date,
                 end_date=end_date,
-                adjust="hfq"  # 后复权
+                adjust="hfq"
             )
 
             if df is None or len(df) == 0:
                 return None
-
-            # 使用 COLUMN_MAP 重命名列（与 DataHandler 保持一致）
-            df = df.rename(columns=self.COLUMN_MAP)
-
-            # 添加股票代码列
-            df['code'] = stock_code
-
-            # 选择需要的列（按 COLUMN_MAP 中定义的英文字段名）
-            required_columns = [
-                'date', 'code', 'open', 'close', 'high', 'low',
-                'volume', 'amount', 'amplitude', 'pct_change',
-                'change_amount', 'turnover'
-            ]
-
-            # 只保留存在的列
-            available_columns = [col for col in required_columns if col in df.columns]
-            df = df[available_columns]
 
             # 确保日期格式
             df['date'] = pd.to_datetime(df['date'])
@@ -450,7 +425,7 @@ class DataUpdater:
             return df
 
         except ImportError:
-            print(f"  导入错误: 需要安装 akshare 库（pip install akshare）")
+            logger.error(f"  导入错误: 需要安装 akshare 库（pip install akshare）")
             return None
         except Exception as e:
             # 让异常传播到 retry 装饰器
@@ -477,7 +452,7 @@ class DataUpdater:
             # 在调用 API 之前 sleep，防止触发使用限制
             time.sleep(0.5)
 
-            print(f"  正在从 akshare 下载指数数据 ({start_date} 至 {end_date})...")
+            logger.info(f"  正在从 akshare 下载指数数据 ({start_date} 至 {end_date})...")
 
             # 获取指数历史数据
             df = ak.index_zh_a_hist(
@@ -504,7 +479,7 @@ class DataUpdater:
             return df
 
         except ImportError:
-            print(f"  导入错误: 需要安装 akshare 库（pip install akshare）")
+            logger.error(f"  导入错误: 需要安装 akshare 库（pip install akshare）")
             return None
         except Exception as e:
             # 让异常传播到 retry 装饰器

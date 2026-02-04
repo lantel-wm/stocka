@@ -10,6 +10,10 @@ import matplotlib.dates as mdates
 from datetime import datetime
 import os
 
+from ..utils.logger import get_logger
+
+logger = get_logger(__name__)
+
 
 class ReportGenerator:
     """
@@ -73,7 +77,7 @@ class ReportGenerator:
             with open(filepath, 'w', encoding='utf-8') as f:
                 f.write(report)
 
-            print(f"报告已保存到: {filepath}")
+            logger.info(f"报告已保存到: {filepath}")
 
         return report
 
@@ -95,7 +99,7 @@ class ReportGenerator:
             图片文件路径（如果保存）
         """
         if not portfolio_history:
-            print("没有数据可用于绘图")
+            logger.warning("没有数据可用于绘图")
             return None
 
         df = pd.DataFrame(portfolio_history)
@@ -147,7 +151,7 @@ class ReportGenerator:
             filename = "equity_curve.png"
             filepath = os.path.join(self.output_dir, filename)
             plt.savefig(filepath, dpi=150, bbox_inches='tight')
-            print(f"资金曲线已保存到: {filepath}")
+            logger.info(f"资金曲线已保存到: {filepath}")
 
         if show:
             plt.show()
@@ -198,7 +202,7 @@ class ReportGenerator:
             filename = "returns_distribution.png"
             filepath = os.path.join(self.output_dir, filename)
             plt.savefig(filepath, dpi=150, bbox_inches='tight')
-            print(f"收益率分布图已保存到: {filepath}")
+            logger.info(f"收益率分布图已保存到: {filepath}")
 
         if show:
             plt.show()
@@ -223,7 +227,7 @@ class ReportGenerator:
             图片文件路径（如果保存）
         """
         if not portfolio_history:
-            print("没有数据可用于绘图")
+            logger.warning("没有数据可用于绘图")
             return None
 
         df = pd.DataFrame(portfolio_history)
@@ -259,7 +263,7 @@ class ReportGenerator:
             filename = "drawdown.png"
             filepath = os.path.join(self.output_dir, filename)
             plt.savefig(filepath, dpi=150, bbox_inches='tight')
-            print(f"回撤图已保存到: {filepath}")
+            logger.info(f"回撤图已保存到: {filepath}")
 
         if show:
             plt.show()
@@ -282,7 +286,7 @@ class ReportGenerator:
             CSV文件路径
         """
         if not trades:
-            print("没有交易记录")
+            logger.warning("没有交易记录")
             return ""
 
         # 转换为DataFrame
@@ -313,10 +317,10 @@ class ReportGenerator:
         filepath = os.path.join(self.output_dir, filename)
         df.to_csv(filepath, index=False, encoding='utf-8-sig')
 
-        print(f"交易记录已导出到: {filepath}")
-        print(f"  - 总交易次数: {len(trades)}")
-        print(f"  - 买入: {len([t for t in trades if t.get('action') == 'buy'])}")
-        print(f"  - 卖出: {len([t for t in trades if t.get('action') == 'sell'])}")
+        logger.info(f"交易记录已导出到: {filepath}")
+        logger.info(f"  - 总交易次数: {len(trades)}")
+        logger.info(f"  - 买入: {len([t for t in trades if t.get('action') == 'buy'])}")
+        logger.info(f"  - 卖出: {len([t for t in trades if t.get('action') == 'sell'])}")
 
         return filepath
 
@@ -334,7 +338,7 @@ class ReportGenerator:
             CSV文件路径
         """
         if not portfolio_history:
-            print("没有持仓历史记录")
+            logger.warning("没有持仓历史记录")
             return ""
 
         # 转换为DataFrame
@@ -361,10 +365,10 @@ class ReportGenerator:
         filepath = os.path.join(self.output_dir, filename)
         df.to_csv(filepath, index=False, encoding='utf-8-sig')
 
-        print(f"持仓历史已导出到: {filepath}")
-        print(f"  - 记录天数: {len(df)}")
-        print(f"  - 起始日期: {df['Date'].iloc[0]}")
-        print(f"  - 结束日期: {df['Date'].iloc[-1]}")
+        logger.info(f"持仓历史已导出到: {filepath}")
+        logger.info(f"  - 记录天数: {len(df)}")
+        logger.info(f"  - 起始日期: {df['Date'].iloc[0]}")
+        logger.info(f"  - 结束日期: {df['Date'].iloc[-1]}")
 
         return filepath
 
@@ -414,7 +418,7 @@ class ReportGenerator:
                     })
 
         if not detailed_records:
-            print("没有详细持仓记录")
+            logger.warning("没有详细持仓记录")
             return ""
 
         # 转换为DataFrame
@@ -427,8 +431,8 @@ class ReportGenerator:
         filepath = os.path.join(self.output_dir, filename)
         df.to_csv(filepath, index=False, encoding='utf-8-sig')
 
-        print(f"详细持仓已导出到: {filepath}")
-        print(f"  - 总持仓记录: {len(detailed_records)}")
+        logger.info(f"详细持仓已导出到: {filepath}")
+        logger.info(f"  - 总持仓记录: {len(detailed_records)}")
 
         return filepath
 
@@ -514,11 +518,11 @@ class ReportGenerator:
         with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(serializable_metrics, f, indent=2, ensure_ascii=False)
 
-        print(f"绩效指标已导出到: {filepath}")
-        print(f"  - 指标数量: {len(serializable_metrics)}")
+        logger.info(f"绩效指标已导出到: {filepath}")
+        logger.info(f"  - 指标数量: {len(serializable_metrics)}")
         if trade_analysis:
-            print(f"  - 完整交易: {trade_analysis.get('completed_trades', 0)} 笔")
-            print(f"  - 胜率: {trade_analysis.get('win_rate', 0):.2f}%")
+            logger.info(f"  - 完整交易: {trade_analysis.get('completed_trades', 0)} 笔")
+            logger.info(f"  - 胜率: {trade_analysis.get('win_rate', 0):.2f}%")
 
         return filepath
 
@@ -536,7 +540,7 @@ class ReportGenerator:
             CSV文件路径
         """
         if not trade_analysis or not trade_analysis.get('trade_details'):
-            print("没有交易详情记录")
+            logger.warning("没有交易详情记录")
             return ""
 
         # 获取交易详情
@@ -576,14 +580,14 @@ class ReportGenerator:
         df.to_csv(filepath, index=False, encoding='utf-8-sig')
 
         # 打印统计信息
-        print(f"交易分析已导出到: {filepath}")
-        print(f"  - 完整交易: {trade_analysis.get('completed_trades', 0)} 笔")
-        print(f"  - 盈利交易: {trade_analysis.get('winning_trades', 0)} 笔")
-        print(f"  - 亏损交易: {trade_analysis.get('losing_trades', 0)} 笔")
-        print(f"  - 胜率: {trade_analysis.get('win_rate', 0):.2f}%")
-        print(f"  - 总盈利: {trade_analysis.get('total_profit', 0):,.2f} 元")
-        print(f"  - 总亏损: {trade_analysis.get('total_loss', 0):,.2f} 元")
-        print(f"  - 净盈亏: {trade_analysis.get('total_pnl', 0):,.2f} 元")
+        logger.info(f"交易分析已导出到: {filepath}")
+        logger.info(f"  - 完整交易: {trade_analysis.get('completed_trades', 0)} 笔")
+        logger.info(f"  - 盈利交易: {trade_analysis.get('winning_trades', 0)} 笔")
+        logger.info(f"  - 亏损交易: {trade_analysis.get('losing_trades', 0)} 笔")
+        logger.info(f"  - 胜率: {trade_analysis.get('win_rate', 0):.2f}%")
+        logger.info(f"  - 总盈利: {trade_analysis.get('total_profit', 0):,.2f} 元")
+        logger.info(f"  - 总亏损: {trade_analysis.get('total_loss', 0):,.2f} 元")
+        logger.info(f"  - 净盈亏: {trade_analysis.get('total_pnl', 0):,.2f} 元")
 
         return filepath
 
@@ -620,7 +624,7 @@ class ReportGenerator:
         with open(filepath, 'w', encoding='utf-8') as f:
             yaml.dump(config_dict, f, allow_unicode=True, default_flow_style=False)
 
-        print(f"配置文件已保存到: {filepath}")
+        logger.info(f"配置文件已保存到: {filepath}")
 
         return filepath
 
@@ -766,6 +770,6 @@ class ReportGenerator:
             with open(filepath, 'w', encoding='utf-8') as f:
                 f.write(html_content)
 
-            print(f"HTML报告已保存到: {filepath}")
+            logger.info(f"HTML报告已保存到: {filepath}")
 
         return filepath

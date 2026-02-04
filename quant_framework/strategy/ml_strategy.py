@@ -12,6 +12,9 @@ from pathlib import Path
 from ..data.data_handler import DataHandler
 from .base_strategy import BaseStrategy, Signal
 from ..model import LGBModel
+from ..utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class CSZScoreNorm:
@@ -127,14 +130,14 @@ class MLStrategy(BaseStrategy):
         # 初始化标准化器
         self.normalizer = CSZScoreNorm(factors=self.factors, method=self.params['norm_method'])
 
-        print(f"✓ 模型加载成功")
-        print(f"  - 因子数量: {len(self.factors)}")
-        print(f"  - 选股数量: {self.params['top_k']}")
-        print(f"  - 调仓周期: 每 {self.params['rebalance_days']} 个交易日")
-        print(f"  - 标准化方法: {self.params['norm_method']}")
+        logger.info(f"模型加载成功")
+        logger.info(f"  - 因子数量: {len(self.factors)}")
+        logger.info(f"  - 选股数量: {self.params['top_k']}")
+        logger.info(f"  - 调仓周期: 每 {self.params['rebalance_days']} 个交易日")
+        logger.info(f"  - 标准化方法: {self.params['norm_method']}")
         if self.params['stop_loss'] is not None:
-            print(f"  - 止损阈值: {self.params['stop_loss']*100:.2f}%")
-            print(f"  - 止损检查: {'每日' if self.params['stop_loss_check_daily'] else '仅调仓日'}")
+            logger.info(f"  - 止损阈值: {self.params['stop_loss']*100:.2f}%")
+            logger.info(f"  - 止损检查: {'每日' if self.params['stop_loss_check_daily'] else '仅调仓日'}")
 
         # 跟踪状态
         self.last_rebalance_date = None  # 上次调仓日期
@@ -180,9 +183,9 @@ class MLStrategy(BaseStrategy):
 
         # 准备预测数据
         pred_data = self._prepare_prediction_data(data_handler, current_date, stock_pool)
-        
+
         if pred_data is None or len(pred_data) == 0:
-            print(f"{current_date}: 没有可用的数据进行预测")
+            logger.warning(f"{current_date}: 没有可用的数据进行预测")
             return signals
 
         # 使用模型预测
@@ -192,7 +195,7 @@ class MLStrategy(BaseStrategy):
         selected_stocks = self._select_stocks(predictions, pred_data)
 
         if not selected_stocks:
-            print(f"{current_date}: 没有选中任何股票")
+            logger.warning(f"{current_date}: 没有选中任何股票")
             return signals
 
         # 生成交易信号
@@ -206,7 +209,7 @@ class MLStrategy(BaseStrategy):
         # 更新最后调仓日期
         self.last_rebalance_date = current_date
 
-        print(f"{current_date}: 第 {self.trading_days_count} 个交易日, 调仓！选中 {len(selected_stocks)} 只股票, 生成 {len(signals)} 个信号")
+        logger.info(f"{current_date}: 第 {self.trading_days_count} 个交易日, 调仓！选中 {len(selected_stocks)} 只股票, 生成 {len(signals)} 个信号")
 
         return signals
 
@@ -280,7 +283,7 @@ class MLStrategy(BaseStrategy):
             prediction_date = data_handler.get_previous_trading_date(current_date, n=1)
 
             if prediction_date is None:
-                print(f"{current_date}: 没有前一个交易日的数据，无法进行预测")
+                logger.warning(f"{current_date}: 没有前一个交易日的数据，无法进行预测")
                 return None
 
             # 获取前一个交易日的数据
@@ -295,7 +298,7 @@ class MLStrategy(BaseStrategy):
             # 检查因子列是否存在
             missing_factors = set(self.factors) - set(daily_data.columns)
             if missing_factors:
-                print(f"警告: 以下因子列不存在: {missing_factors}")
+                logger.warning(f"以下因子列不存在: {missing_factors}")
                 return None
 
             # 复制数据, 避免修改原始数据
@@ -305,7 +308,7 @@ class MLStrategy(BaseStrategy):
             pred_data = pred_data[~pred_data['close'].isna()]
 
             if len(pred_data) == 0:
-                print(f"{current_date} (使用{prediction_date}的数据): 所有股票的 close 价格都为 NaN")
+                logger.warning(f"{current_date} (使用{prediction_date}的数据): 所有股票的 close 价格都为 NaN")
                 return None
 
             # 截面标准化 (Cross Sectional Z-Score Normalization)
@@ -317,7 +320,7 @@ class MLStrategy(BaseStrategy):
             return pred_data
 
         except Exception as e:
-            print(f"准备预测数据时出错: {e}")
+            logger.error(f"准备预测数据时出错: {e}")
             import traceback
             traceback.print_exc()
             return None
@@ -411,7 +414,7 @@ class MLStrategy(BaseStrategy):
 
                 # 如果价格获取失败, 跳过该股票
                 if price is None:
-                    print(f"{current_date}: 跳过卖出 {code}, 无法获取价格")
+                    logger.warning(f"{current_date}: 跳过卖出 {code}, 无法获取价格")
                     continue
 
                 # 生成卖出信号
@@ -443,7 +446,7 @@ class MLStrategy(BaseStrategy):
 
             # 如果价格获取失败, 跳过该股票
             if price is None:
-                print(f"{current_date}: 跳过买入 {code}, 无法获取价格")
+                logger.warning(f"{current_date}: 跳过买入 {code}, 无法获取价格")
                 continue
 
             # 生成买入信号
@@ -547,7 +550,7 @@ class MLStrategy(BaseStrategy):
                 # 清除持仓记录
                 del self.position_entries[code]
 
-                print(f"{current_date}: 止损卖出 {code}, 买入价={entry_price:.2f}, "
+                logger.info(f"{current_date}: 止损卖出 {code}, 买入价={entry_price:.2f}, "
                       f"当前价={current_price:.2f}, 亏损={return_rate*100:.2f}%")
 
         return signals
@@ -584,10 +587,10 @@ class MLStrategy(BaseStrategy):
         # 过滤并排序交易日历
         self.trading_dates = sorted([d for d in all_dates if d >= strategy_start_date])
 
-        print(f"✓ 实盘模式初始化完成:")
-        print(f"  - 策略开始日期: {strategy_start_date}")
-        print(f"  - 交易日历数量: {len(self.trading_dates)} 个交易日")
-        print(f"  - 交易日期范围: {self.trading_dates[0]} 至 {self.trading_dates[-1]}")
+        logger.info(f"实盘模式初始化完成:")
+        logger.info(f"  - 策略开始日期: {strategy_start_date}")
+        logger.info(f"  - 交易日历数量: {len(self.trading_dates)} 个交易日")
+        logger.info(f"  - 交易日期范围: {self.trading_dates[0]} 至 {self.trading_dates[-1]}")
 
     def is_rebalance_day(self, current_date: date) -> bool:
         """

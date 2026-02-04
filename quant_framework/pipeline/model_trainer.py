@@ -10,6 +10,9 @@ import pandas as pd
 from ..data.data_handler import DataHandler
 from ..model.lgb_model import LGBModel
 from .data_loader import DataLoader
+from ..utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class ModelTrainer:
@@ -60,7 +63,7 @@ class ModelTrainer:
         Returns:
             (训练数据, 验证数据)
         """
-        print("\n准备训练数据...")
+        logger.info("\n准备训练数据...")
 
         # 加载训练集（每个DataLoader独立进行截面标准化）
         self.train_df = train_loader.load()
@@ -80,7 +83,7 @@ class ModelTrainer:
         if self.train_df is None or self.valid_df is None:
             self.prepare_data()
 
-        print("\n开始训练模型...")
+        logger.info("\n开始训练模型...")
 
         # 创建模型
         self.model = LGBModel(
@@ -100,9 +103,9 @@ class ModelTrainer:
         # 获取最佳迭代轮数
         if 'valid' in evals_result and 'l2' in evals_result['valid']:
             best_iteration = len(evals_result['valid']['l2'])
-            print(f"\n✓ 模型训练完成，迭代轮数: {best_iteration}")
+            logger.info(f"\n✓ 模型训练完成，迭代轮数: {best_iteration}")
         else:
-            print(f"\n✓ 模型训练完成")
+            logger.info(f"\n✓ 模型训练完成")
 
         return self.model
 

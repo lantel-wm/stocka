@@ -11,6 +11,9 @@ from ..strategy.base_strategy import Signal
 from ..portfolio.portfolio import Portfolio
 from ..execution.transaction_cost import TransactionCost
 from ..utils.constraints import TradingConstraints
+from ..utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -175,7 +178,7 @@ class TradeExecutor:
             return success
 
         except Exception as e:
-            print(f"执行订单失败: {e}")
+            logger.error(f"执行订单失败: {e}")
             order.status = "failed"
             return False
 

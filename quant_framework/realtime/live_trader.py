@@ -13,6 +13,9 @@ import pandas as pd
 from ..data.data_handler import DataHandler
 from ..strategy.base_strategy import BaseStrategy, Signal
 from .data_updater import DataUpdater
+from ..utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class LiveTrader:
@@ -76,17 +79,17 @@ class LiveTrader:
         # 尝试加载现有状态
         self._load_state()
 
-        print(f"✓ 实盘交易调度器初始化完成")
-        print(f"  - 数据目录: {data_dir}")
-        print(f"  - 信号输出目录: {signal_output_dir}")
-        print(f"  - 状态文件: {state_file}")
+        logger.info(f"✓ 实盘交易调度器初始化完成")
+        logger.info(f"  - 数据目录: {data_dir}")
+        logger.info(f"  - 信号输出目录: {signal_output_dir}")
+        logger.info(f"  - 状态文件: {state_file}")
 
         if self.state['strategy_start_date']:
-            print(f"\n已加载历史状态:")
-            print(f"  - 策略开始日期: {self.state['strategy_start_date']}")
-            print(f"  - 上次交易日期: {self.state['last_trading_date']}")
-            print(f"  - 交易日计数: {self.state['trading_days_count']}")
-            print(f"  - 上次调仓日: {self.state['last_rebalance_date']}")
+            logger.info(f"\n已加载历史状态:")
+            logger.info(f"  - 策略开始日期: {self.state['strategy_start_date']}")
+            logger.info(f"  - 上次交易日期: {self.state['last_trading_date']}")
+            logger.info(f"  - 交易日计数: {self.state['trading_days_count']}")
+            logger.info(f"  - 上次调仓日: {self.state['last_rebalance_date']}")
 
     def run(self,
             target_date: date,
@@ -121,24 +124,24 @@ class LiveTrader:
         }
 
         try:
-            print(f"\n{'='*70}")
-            print(f"实盘交易运行 - {target_date}")
-            print(f"{'='*70}")
+            logger.info(f"\n{'='*70}")
+            logger.info(f"实盘交易运行 - {target_date}")
+            logger.info(f"{'='*70}")
 
             # 1. 加载数据
             if self.data_handler is None:
-                print(f"\n[1/5] 加载数据...")
+                logger.info(f"\n[1/5] 加载数据...")
                 self.data_handler = DataHandler(
                     data_path=self.data_dir,
                     use_parquet=False
                 )
                 self.data_handler.load_data()
-                print(f"✓ 数据加载完成")
+                logger.info(f"✓ 数据加载完成")
             else:
-                print(f"\n[1/5] 使用已加载的数据")
+                logger.info(f"\n[1/5] 使用已加载的数据")
 
             # 2. 检查目标日期是否为交易日
-            print(f"\n[2/5] 检查交易日...")
+            logger.info(f"\n[2/5] 检查交易日...")
             available_dates = self.data_handler.get_available_dates()
 
             if target_date not in available_dates:
@@ -150,40 +153,40 @@ class LiveTrader:
                     return result
 
                 actual_date = recent_dates[-1]
-                print(f"⚠ {target_date} 不是交易日，使用最近的交易日：{actual_date}")
+                logger.warning(f"⚠ {target_date} 不是交易日，使用最近的交易日：{actual_date}")
             else:
                 actual_date = target_date
-                print(f"✓ {actual_date} 是交易日")
+                logger.info(f"✓ {actual_date} 是交易日")
 
             # 3. 初始化策略实盘模式（首次运行）
-            print(f"\n[3/5] 初始化策略...")
+            logger.info(f"\n[3/5] 初始化策略...")
             if self.state['strategy_start_date'] is None:
                 self.state['strategy_start_date'] = actual_date.strftime('%Y-%m-%d')
                 self.strategy.initialize_for_live_trading(
                     data_handler=self.data_handler,
                     strategy_start_date=actual_date
                 )
-                print(f"✓ 策略首次初始化完成")
+                logger.info(f"✓ 策略首次初始化完成")
             else:
-                print(f"✓ 策略已初始化（开始日期：{self.state['strategy_start_date']}）")
+                logger.info(f"✓ 策略已初始化（开始日期：{self.state['strategy_start_date']}）")
 
             # 4. 判断是否为调仓日
-            print(f"\n[4/5] 判断调仓日...")
+            logger.info(f"\n[4/5] 判断调仓日...")
             is_rebalance_day = self.strategy.is_rebalance_day(actual_date)
 
             if force_rebalance:
-                print(f"⚠ 强制调仓模式启用")
+                logger.warning(f"⚠ 强制调仓模式启用")
                 is_rebalance_day = True
 
             result['is_rebalance_day'] = is_rebalance_day
 
             if is_rebalance_day:
-                print(f"✓ {actual_date} 是调仓日")
+                logger.info(f"✓ {actual_date} 是调仓日")
             else:
-                print(f"⊙ {actual_date} 不是调仓日，下次调仓日：{self.strategy.get_next_rebalance_date(actual_date)}")
+                logger.info(f"⊙ {actual_date} 不是调仓日，下次调仓日：{self.strategy.get_next_rebalance_date(actual_date)}")
 
             # 5. 调用策略生成信号
-            print(f"\n[5/5] 生成交易信号...")
+            logger.info(f"\n[5/5] 生成交易信号...")
 
             # 创建一个简单的 portfolio 对象（仅用于接口兼容）
             class SimplePortfolio:
@@ -206,12 +209,12 @@ class LiveTrader:
             result['signals_generated'] = len(signals)
 
             if signals:
-                print(f"✓ 生成 {len(signals)} 个交易信号")
+                logger.info(f"✓ 生成 {len(signals)} 个交易信号")
 
                 # 显示信号详情
                 for signal in signals:
                     signal_type = "买入" if signal.signal_type == Signal.BUY else "卖出"
-                    print(f"  - {signal_type} {signal.code}: "
+                    logger.info(f"  - {signal_type} {signal.code}: "
                           f"价格={signal.price:.2f}, "
                           f"权重={signal.weight:.2%}, "
                           f"原因={signal.reason}")
@@ -220,7 +223,7 @@ class LiveTrader:
                 self._export_signals(signals, actual_date, export_format)
 
             else:
-                print(f"⊙ 没有生成交易信号")
+                logger.info(f"⊙ 没有生成交易信号")
 
             # 6. 更新状态
             self._update_state(actual_date, is_rebalance_day, signals)
@@ -233,16 +236,16 @@ class LiveTrader:
                 result['status'] = 'no_rebalance'
                 result['message'] = f'运行完成，但不是调仓日'
 
-            print(f"\n{'='*70}")
-            print(f"实盘交易运行完成")
-            print(f"{'='*70}")
+            logger.info(f"\n{'='*70}")
+            logger.info(f"实盘交易运行完成")
+            logger.info(f"{'='*70}")
 
         except Exception as e:
             result['status'] = 'error'
             result['message'] = f'运行失败: {str(e)}'
-            print(f"\n✗ 错误: {e}")
+            logger.error(f"\n✗ 错误: {e}")
             import traceback
-            traceback.print_exc()
+            logger.error(traceback.format_exc())
 
         return result
 
@@ -263,17 +266,17 @@ class LiveTrader:
         Returns:
             执行结果字典（包含 update_result 和 run_result）
         """
-        print(f"\n{'#'*70}")
-        print(f"实盘交易完整流程（数据更新 + 策略运行）")
-        print(f"目标日期: {target_date}")
-        print(f"{'#'*70}")
+        logger.info(f"\n{'#'*70}")
+        logger.info(f"实盘交易完整流程（数据更新 + 策略运行）")
+        logger.info(f"目标日期: {target_date}")
+        logger.info(f"{'#'*70}")
 
         update_result = None
 
         # 1. 更新数据
         if update_stocks:
-            print(f"\n【第一步】更新数据...")
-            print(f"-" * 70)
+            logger.info(f"\n【第一步】更新数据...")
+            logger.info(f"-" * 70)
 
             try:
                 # 获取需要更新的股票列表
@@ -281,37 +284,37 @@ class LiveTrader:
 
                 if stock_pool:
                     # 批量更新股票数据
-                    print(f"准备更新 {len(stock_pool)} 只股票的数据...")
+                    logger.info(f"准备更新 {len(stock_pool)} 只股票的数据...")
                     update_result = self.data_updater.update_batch_stock_data(
                         stock_codes=stock_pool,
                         end_date=target_date.strftime('%Y%m%d'),
-                        delay=0.5
+                        delay=1.0
                     )
                 else:
-                    print(f"⚠ 没有找到需要更新的股票，跳过数据更新")
+                    logger.warning(f"⚠ 没有找到需要更新的股票，跳过数据更新")
                     update_result = None
 
             except Exception as e:
-                print(f"✗ 数据更新失败: {e}")
+                logger.error(f"✗ 数据更新失败: {e}")
                 update_result = None
 
         # 2. 重新加载数据（清空旧的 data_handler）
-        print(f"\n【第二步】重新加载数据...")
-        print(f"-" * 70)
+        logger.info(f"\n【第二步】重新加载数据...")
+        logger.info(f"-" * 70)
         self.data_handler = None
 
         # 3. 运行策略
-        print(f"\n【第三步】运行策略...")
-        print(f"-" * 70)
+        logger.info(f"\n【第三步】运行策略...")
+        logger.info(f"-" * 70)
         run_result = self.run(
             target_date=target_date,
             force_rebalance=force_rebalance,
             export_format=export_format
         )
 
-        print(f"\n{'#'*70}")
-        print(f"完整流程执行完成")
-        print(f"{'#'*70}")
+        logger.info(f"\n{'#'*70}")
+        logger.info(f"完整流程执行完成")
+        logger.info(f"{'#'*70}")
 
         return {
             'date': target_date,
@@ -354,14 +357,14 @@ class LiveTrader:
                     code = os.path.basename(file_path).replace('.parquet', '').replace('.csv', '')
                     stock_codes.append(code)
 
-                print(f"从数据目录扫描到 {len(stock_codes)} 只股票")
+                logger.info(f"从数据目录扫描到 {len(stock_codes)} 只股票")
                 return stock_codes
             else:
-                print(f"⚠ 数据目录为空: {self.data_dir}")
+                logger.warning(f"⚠ 数据目录为空: {self.data_dir}")
                 return []
 
         except Exception as e:
-            print(f"⚠ 扫描数据目录失败: {e}")
+            logger.warning(f"⚠ 扫描数据目录失败: {e}")
             return []
 
     def _export_signals(self,
@@ -399,7 +402,7 @@ class LiveTrader:
 
             df = pd.DataFrame(data)
             df.to_csv(csv_file, index=False, encoding='utf-8')
-            print(f"  ✓ 信号已导出到: {csv_file}")
+            logger.info(f"  ✓ 信号已导出到: {csv_file}")
 
         # 导出 JSON
         if export_format in ['json', 'both']:
@@ -416,7 +419,7 @@ class LiveTrader:
             with open(json_file, 'w', encoding='utf-8') as f:
                 json.dump(signal_data, f, ensure_ascii=False, indent=2)
 
-            print(f"  ✓ 信号已导出到: {json_file}")
+            logger.info(f"  ✓ 信号已导出到: {json_file}")
 
     def _update_state(self,
                      current_date: date,
@@ -465,7 +468,7 @@ class LiveTrader:
             with open(self.state_file, 'w', encoding='utf-8') as f:
                 json.dump(self.state, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            print(f"⚠ 保存状态失败: {e}")
+            logger.warning(f"⚠ 保存状态失败: {e}")
 
     def _load_state(self) -> None:
         """从文件加载状态"""
@@ -473,9 +476,9 @@ class LiveTrader:
             if os.path.exists(self.state_file):
                 with open(self.state_file, 'r', encoding='utf-8') as f:
                     self.state = json.load(f)
-                print(f"✓ 已加载历史状态文件")
+                logger.info(f"✓ 已加载历史状态文件")
         except Exception as e:
-            print(f"⚠ 加载状态文件失败: {e}，将使用初始状态")
+            logger.warning(f"⚠ 加载状态文件失败: {e}，将使用初始状态")
 
     def get_execution_summary(self) -> Dict:
         """
@@ -510,23 +513,23 @@ class LiveTrader:
         """打印执行摘要"""
         summary = self.get_execution_summary()
 
-        print(f"\n{'='*70}")
-        print(f"执行摘要")
-        print(f"{'='*70}")
-        print(f"总执行次数: {summary['total_executions']}")
-        print(f"调仓次数: {summary['rebalance_count']}")
-        print(f"交易日计数: {summary['trading_days_count']}")
-        print(f"上次调仓日: {summary['last_rebalance_date'] or '未调仓'}")
+        logger.info(f"\n{'='*70}")
+        logger.info(f"执行摘要")
+        logger.info(f"{'='*70}")
+        logger.info(f"总执行次数: {summary['total_executions']}")
+        logger.info(f"调仓次数: {summary['rebalance_count']}")
+        logger.info(f"交易日计数: {summary['trading_days_count']}")
+        logger.info(f"上次调仓日: {summary['last_rebalance_date'] or '未调仓'}")
 
         if summary['recent_signals']:
-            print(f"\n最近的执行记录:")
+            logger.info(f"\n最近的执行记录:")
             for record in summary['recent_signals'][-5:]:
-                print(f"  {record['date']}: "
+                logger.info(f"  {record['date']}: "
                       f"{'[调仓]' if record['is_rebalance'] else '[普通]'}, "
                       f"{record['signals']['total']} 个信号 "
                       f"(买入: {record['signals']['buy']}, 卖出: {record['signals']['sell']})")
 
-        print(f"{'='*70}")
+        logger.info(f"{'='*70}")
 
     def reset_state(self) -> None:
         """重置状态"""
@@ -538,4 +541,4 @@ class LiveTrader:
             'execution_history': []
         }
         self._save_state()
-        print(f"✓ 状态已重置")
+        logger.info(f"✓ 状态已重置")

@@ -11,6 +11,9 @@ from ..data.data_handler import DataHandler
 from ..strategy.base_strategy import BaseStrategy
 from ..portfolio.portfolio import Portfolio
 from ..execution.transaction_cost import TransactionCost
+from ..utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class BacktestEngine:
@@ -73,13 +76,13 @@ class BacktestEngine:
         start_time = datetime.now()
 
         if verbose:
-            print("=" * 60)
-            print("开始回测")
-            print("=" * 60)
-            print(f"策略: {self.strategy.name}")
-            print(f"参数: {self.strategy.params}")
-            print(f"初始资金: {self.initial_capital:,.2f} 元")
-            print("-" * 60)
+            logger.info("=" * 60)
+            logger.info("开始回测")
+            logger.info("=" * 60)
+            logger.info(f"策略: {self.strategy.name}")
+            logger.info(f"参数: {self.strategy.params}")
+            logger.info(f"初始资金: {self.initial_capital:,.2f} 元")
+            logger.info("-" * 60)
 
         # 获取交易日期列表
         trading_dates = self.data_handler.get_available_dates(
@@ -106,8 +109,8 @@ class BacktestEngine:
                 if start_index >= min_bars:
                     # 有足够数据，无需调整
                     if verbose:
-                        print(f"策略需要 {min_bars} 条前置bar数据")
-                        print(f"数据准备期: {all_dates[start_index - min_bars]} 至 {original_start_date}")
+                        logger.info(f"策略需要 {min_bars} 条前置bar数据")
+                        logger.info(f"数据准备期: {all_dates[start_index - min_bars]} 至 {original_start_date}")
                 else:
                     # 数据不足，往前调整开始日期
                     adjusted_start_index = min_bars
@@ -120,23 +123,23 @@ class BacktestEngine:
                     ]
 
                     if verbose:
-                        print(f"策略需要 {min_bars} 条前置bar数据")
-                        print(f"原始开始日期: {original_start_date}（往前不足{min_bars}条数据）")
-                        print(f"调整后开始日期: {adjusted_start_date}")
+                        logger.info(f"策略需要 {min_bars} 条前置bar数据")
+                        logger.info(f"原始开始日期: {original_start_date}（往前不足{min_bars}条数据）")
+                        logger.info(f"调整后开始日期: {adjusted_start_date}")
             else:
                 # 找不到指定开始日期
                 if len(all_dates) > min_bars:
                     trading_dates = all_dates[min_bars:]
                     if verbose:
-                        print(f"未找到指定开始日期 {original_start_date}")
-                        print(f"调整后开始日期: {trading_dates[0]}（数据准备期: {all_dates[0]} 至 {trading_dates[0]}）")
+                        logger.info(f"未找到指定开始日期 {original_start_date}")
+                        logger.info(f"调整后开始日期: {trading_dates[0]}（数据准备期: {all_dates[0]} 至 {trading_dates[0]}）")
                 else:
                     raise ValueError(f"数据不足：总共只有 {len(all_dates)} 条数据，策略需要 {min_bars} 条")
 
         if verbose:
-            print(f"回测期间: {trading_dates[0]} 至 {trading_dates[-1]}")
-            print(f"交易日数: {len(trading_dates)}")
-            print("-" * 60)
+            logger.info(f"回测期间: {trading_dates[0]} 至 {trading_dates[-1]}")
+            logger.info(f"交易日数: {len(trading_dates)}")
+            logger.info("-" * 60)
 
         # 逐日回测
         for i, current_date in enumerate(trading_dates):
@@ -157,7 +160,7 @@ class BacktestEngine:
 
             # 打印进度
             if verbose and (i + 1) % 50 == 0:
-                print(f"[{i+1}/{len(trading_dates)}] "
+                logger.info(f"[{i+1}/{len(trading_dates)}] "
                       f"{current_date} | "
                       f"总资产: {self.portfolio.total_value:,.2f} | "
                       f"持仓: {self.portfolio.get_position_count()}")
@@ -173,31 +176,31 @@ class BacktestEngine:
         duration = (end_time - start_time).total_seconds()
 
         if verbose:
-            print("-" * 60)
-            print("回测完成")
-            print(f"耗时: {duration:.2f} 秒")
-            print(f"最终权益: {self.results['final_value']:,.2f} 元")
-            print(f"总收益率: {self.results['total_return']*100:.2f}%")
-            print(f"总交易次数: {len(self.results['trades'])}")
+            logger.info("-" * 60)
+            logger.info("回测完成")
+            logger.info(f"耗时: {duration:.2f} 秒")
+            logger.info(f"最终权益: {self.results['final_value']:,.2f} 元")
+            logger.info(f"总收益率: {self.results['total_return']*100:.2f}%")
+            logger.info(f"总交易次数: {len(self.results['trades'])}")
 
             # 显示交易统计
             trade_analysis = self.results['trade_analysis']
             if trade_analysis['completed_trades'] > 0:
-                print("\n" + "=" * 60)
-                print("交易统计")
-                print("=" * 60)
-                print(f"完整交易: {trade_analysis['completed_trades']} 笔")
-                print(f"盈利交易: {trade_analysis['winning_trades']} 笔")
-                print(f"亏损交易: {trade_analysis['losing_trades']} 笔")
-                print(f"胜率: {trade_analysis['win_rate']:.2f}%")
-                print(f"平均盈利: {trade_analysis['avg_profit']:,.2f} 元")
-                print(f"平均亏损: {trade_analysis['avg_loss']:,.2f} 元")
-                print(f"盈亏比: {trade_analysis['profit_loss_ratio']:.2f}")
-                print(f"总盈利: {trade_analysis['total_profit']:,.2f} 元")
-                print(f"总亏损: {trade_analysis['total_loss']:,.2f} 元")
-                print(f"净盈亏: {trade_analysis['total_pnl']:,.2f} 元")
-                print("=" * 60)
-            print("=" * 60)
+                logger.info("\n" + "=" * 60)
+                logger.info("交易统计")
+                logger.info("=" * 60)
+                logger.info(f"完整交易: {trade_analysis['completed_trades']} 笔")
+                logger.info(f"盈利交易: {trade_analysis['winning_trades']} 笔")
+                logger.info(f"亏损交易: {trade_analysis['losing_trades']} 笔")
+                logger.info(f"胜率: {trade_analysis['win_rate']:.2f}%")
+                logger.info(f"平均盈利: {trade_analysis['avg_profit']:,.2f} 元")
+                logger.info(f"平均亏损: {trade_analysis['avg_loss']:,.2f} 元")
+                logger.info(f"盈亏比: {trade_analysis['profit_loss_ratio']:.2f}")
+                logger.info(f"总盈利: {trade_analysis['total_profit']:,.2f} 元")
+                logger.info(f"总亏损: {trade_analysis['total_loss']:,.2f} 元")
+                logger.info(f"净盈亏: {trade_analysis['total_pnl']:,.2f} 元")
+                logger.info("=" * 60)
+            logger.info("=" * 60)
 
         return self.results
 

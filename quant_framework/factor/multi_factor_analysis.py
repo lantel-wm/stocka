@@ -9,6 +9,9 @@ import numpy as np
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from .factor_metrics import FactorMetrics
+from ..utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class MultiFactorAnalysis:
@@ -382,16 +385,16 @@ class MultiFactorAnalysis:
         Args:
             report_df: generate_combined_report()生成的DataFrame
         """
-        print("=" * 100)
-        print("多因子综合分析报告")
-        print("=" * 100)
-        print()
+        logger.info("=" * 100)
+        logger.info("多因子综合分析报告")
+        logger.info("=" * 100)
+        logger.info("")
 
         # 设置显示格式
         pd.set_option('display.max_columns', None)
         pd.set_option('display.width', None)
 
-        print(report_df.to_string())
-        print()
+        logger.info(f"\n{report_df.to_string()}")
+        logger.info("")
 
-        print("=" * 100)
+        logger.info("=" * 100)

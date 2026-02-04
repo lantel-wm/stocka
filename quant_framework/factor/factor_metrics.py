@@ -7,6 +7,9 @@ from typing import Dict, List, Optional, Tuple
 import pandas as pd
 import numpy as np
 from scipy import stats
+from ..utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class FactorMetrics:
@@ -260,29 +263,29 @@ class FactorMetrics:
         Args:
             report: generate_report()生成的报告字典
         """
-        print("=" * 70)
-        print(f"因子分析报告: {report['factor_name']}")
-        print("=" * 70)
-        print()
+        logger.info("=" * 70)
+        logger.info(f"因子分析报告: {report['factor_name']}")
+        logger.info("=" * 70)
+        logger.info("")
 
-        print("IC指标（Pearson相关系数）:")
-        print(f"  IC均值: {report['ic_mean']:.4f}")
-        print(f"  IC标准差: {report['ic_std']:.4f}")
-        print(f"  ICIR: {report['ic_ir']:.4f}")
-        print(f"  IC>0占比: {report['ic_positive_ratio']:.2%}")
-        print(f"  IC绝对值均值: {report['abs_ic_mean']:.4f}")
-        print(f"  最大IC: {report['max_ic']:.4f}")
-        print(f"  最小IC: {report['min_ic']:.4f}")
-        print()
+        logger.info("IC指标（Pearson相关系数）:")
+        logger.info(f"  IC均值: {report['ic_mean']:.4f}")
+        logger.info(f"  IC标准差: {report['ic_std']:.4f}")
+        logger.info(f"  ICIR: {report['ic_ir']:.4f}")
+        logger.info(f"  IC>0占比: {report['ic_positive_ratio']:.2%}")
+        logger.info(f"  IC绝对值均值: {report['abs_ic_mean']:.4f}")
+        logger.info(f"  最大IC: {report['max_ic']:.4f}")
+        logger.info(f"  最小IC: {report['min_ic']:.4f}")
+        logger.info("")
 
-        print("Rank IC指标（Spearman秩相关系数）:")
-        print(f"  Rank IC均值: {report['rank_ic_mean']:.4f}")
-        print(f"  Rank IC标准差: {report['rank_ic_std']:.4f}")
-        print(f"  Rank ICIR: {report['rank_ic_ir']:.4f}")
-        print(f"  Rank IC>0占比: {report['rank_ic_positive_ratio']:.2%}")
-        print()
+        logger.info("Rank IC指标（Spearman秩相关系数）:")
+        logger.info(f"  Rank IC均值: {report['rank_ic_mean']:.4f}")
+        logger.info(f"  Rank IC标准差: {report['rank_ic_std']:.4f}")
+        logger.info(f"  Rank ICIR: {report['rank_ic_ir']:.4f}")
+        logger.info(f"  Rank IC>0占比: {report['rank_ic_positive_ratio']:.2%}")
+        logger.info("")
 
-        print("其他信息:")
-        print(f"  预测期数: {report['periods']}")
-        print(f"  样本数: {report['sample_size']}")
-        print()
+        logger.info("其他信息:")
+        logger.info(f"  预测期数: {report['periods']}")
+        logger.info(f"  样本数: {report['sample_size']}")
+        logger.info("")

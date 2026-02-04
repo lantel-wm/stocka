@@ -8,6 +8,9 @@ import pandas as pd
 import numpy as np
 
 from ..data.data_handler import DataHandler
+from ..utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class CSZScoreNorm:
@@ -124,13 +127,11 @@ class DataLoader:
         Returns:
             添加了LABEL0列的DataFrame
         """
-        df = df.copy()
-
         # 按 code 分组计算未来收益率
         close_shift_1 = df.groupby(level=0)['close'].shift(-1)
         close_shift_2 = df.groupby(level=0)['close'].shift(-2)
 
-        # 计算收益率
+        # 计算收益率（直接在原 DataFrame 上操作，避免 copy）
         df['LABEL0'] = close_shift_2 / close_shift_1 - 1
 
         return df
@@ -159,7 +160,7 @@ class DataLoader:
         Returns:
             处理后的DataFrame
         """
-        print(f"加载{self.segment}数据: {self.start_date} 至 {self.end_date}")
+        logger.info(f"加载{self.segment}数据: {self.start_date} 至 {self.end_date}")
 
         # 获取数据（DataHandler已确保数据在指定时间范围内）
         data = self.data_handler.get_all_data()
@@ -167,7 +168,17 @@ class DataLoader:
         if data is None or len(data) == 0:
             raise ValueError("没有可用的数据")
 
-        print(f"  - 原始样本数: {len(data)}")
+        # 按日期范围筛选数据（重要：当多个 DataHandler 共享时需要）
+        start_date = pd.to_datetime(self.start_date)
+        end_date = pd.to_datetime(self.end_date)
+        data = data.loc[(slice(None), slice(start_date, end_date)), :]
+
+        logger.info(f"  - 原始样本数: {len(data)}")
+
+        # 优化：将因子列转换为 float32，节省内存
+        for col in self.factors:
+            if col in data.columns and data[col].dtype == 'float64':
+                data[col] = data[col].astype('float32')
 
         # 计算标签
         data = self.get_label(data)
@@ -175,7 +186,7 @@ class DataLoader:
         # 处理标签（过滤极端值）
         data = self.process_label(data)
 
-        print(f"  - 过滤后样本数: {len(data)}")
+        logger.info(f"  - 过滤后样本数: {len(data)}")
 
         # 截面标准化（对 factors + LABEL0 进行标准化）
         cols_to_norm = self.factors + ['LABEL0']
@@ -184,7 +195,12 @@ class DataLoader:
         # 填充缺失值为0
         data[cols_to_norm] = data[cols_to_norm].fillna(0)
 
-        print(f"  - 最终样本数: {len(data)}")
+        # 优化：将标准化后的列转换为 float32
+        for col in cols_to_norm:
+            if col in data.columns and data[col].dtype == 'float64':
+                data[col] = data[col].astype('float32')
+
+        logger.info(f"  - 最终样本数: {len(data)}")
 
         self.data = data
         return data

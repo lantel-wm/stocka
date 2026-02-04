@@ -10,6 +10,10 @@ import numpy as np
 from typing import Dict, Any, Optional
 from pathlib import Path
 
+from ..utils.logger import get_logger
+
+logger = get_logger(__name__)
+
 
 class LGBModel:
     """
@@ -164,13 +168,13 @@ class LGBModel:
             pkl_path = model_path.with_suffix('.pkl')
             with open(pkl_path, 'wb') as f:
                 pickle.dump(self, f)
-            print(f"✓ 模型已保存到: {pkl_path}")
+            logger.info(f"模型已保存到: {pkl_path}")
 
         if save_format in ["txt", "both"]:
             # 使用 lightgbm 原生格式（只保存模型，不保存训练信息）
             txt_path = model_path.with_suffix('.txt')
             self.model.save_model(str(txt_path))
-            print(f"✓ 模型已保存到: {txt_path}")
+            logger.info(f"模型已保存到: {txt_path}")
 
     @classmethod
     def load_model(cls, model_path: str) -> 'LGBModel':
@@ -190,9 +194,9 @@ class LGBModel:
             with open(model_path, 'rb') as f:
                 model_instance = pickle.load(f)
 
-            print(f"✓ 模型已从 {model_path} 加载")
+            logger.info(f"模型已从 {model_path} 加载")
             if hasattr(model_instance, 'model') and model_instance.model is not None:
-                print(f"  - 训练轮数: {model_instance.model.num_trees()}")
+                logger.info(f"  - 训练轮数: {model_instance.model.num_trees()}")
 
             return model_instance
 
@@ -202,8 +206,8 @@ class LGBModel:
             model_instance = cls()  # 创建新实例（使用默认参数）
             model_instance.model = booster
 
-            print(f"✓ 模型已从 {model_path} 加载")
-            print(f"  - 训练轮数: {booster.num_trees()}")
+            logger.info(f"模型已从 {model_path} 加载")
+            logger.info(f"  - 训练轮数: {booster.num_trees()}")
 
             return model_instance
 

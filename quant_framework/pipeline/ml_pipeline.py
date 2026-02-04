@@ -7,6 +7,7 @@ from typing import Dict, Optional
 from pathlib import Path
 from datetime import datetime, date
 import pandas as pd
+import gc
 
 from ..data.data_handler import DataHandler
 from ..strategy.ml_strategy import MLStrategy
@@ -16,6 +17,9 @@ from ..performance.reports import ReportGenerator
 from .model_trainer import ModelTrainer
 from .model_evaluator import ModelEvaluator
 from .data_loader import DataLoader
+from ..utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def str_to_date(date_str: str) -> date:
@@ -71,8 +75,8 @@ class MLPipeline:
         self.evaluation_metrics = None
         self.backtest_results = None
 
-        print(f"✓ Pipeline初始化完成")
-        print(f"  - 输出目录: {self.output_dir}")
+        logger.info(f"✓ Pipeline初始化完成")
+        logger.info(f"  - 输出目录: {self.output_dir}")
 
     def _validate_config(self, config: Dict) -> Dict:
         """验证配置并设置默认值"""
@@ -131,40 +135,33 @@ class MLPipeline:
         Returns:
             训练信息字典
         """
-        print("\n" + "=" * 60)
-        print("第2步：模型训练")
-        print("=" * 60)
+        logger.info("\n" + "=" * 60)
+        logger.info("第2步：模型训练")
+        logger.info("=" * 60)
 
-        print(f"使用因子数量: {len(self.config['factors'])}")
+        logger.info(f"使用因子数量: {len(self.config['factors'])}")
 
-        # 创建训练集独立的 DataHandler
-        train_data_handler = DataHandler(
+        # 创建单个 DataHandler 加载训练+验证集的所有数据
+        # 这样可以避免重复加载相同的数据文件
+        combined_start = str_to_date(self.config['train_start'])
+        combined_end = str_to_date(self.config['valid_end'])
+
+        logger.info(f"加载训练+验证集数据: {self.config['train_start']} 至 {self.config['valid_end']}")
+        combined_data_handler = DataHandler(
             data_path=self.config['data_path'],
             min_data_points=self.config['min_data_points'],
             use_parquet=self.config.get('use_parquet', True),
             num_workers=self.config.get('num_workers', 4),
         )
-        train_data_handler.load_data(
-            start_date=str_to_date(self.config['train_start']),
-            end_date=str_to_date(self.config['train_end'])
+        combined_data_handler.load_data(
+            start_date=combined_start,
+            end_date=combined_end
         )
 
-        # 创建验证集独立的 DataHandler
-        valid_data_handler = DataHandler(
-            data_path=self.config['data_path'],
-            min_data_points=self.config['min_data_points'],
-            use_parquet=self.config.get('use_parquet', True),
-            num_workers=self.config.get('num_workers', 4),
-        )
-        valid_data_handler.load_data(
-            start_date=str_to_date(self.config['valid_start']),
-            end_date=str_to_date(self.config['valid_end'])
-        )
-
-        # 创建训练集 DataLoader
+        # 创建训练集 DataLoader（会从 DataHandler 中筛选训练日期范围的数据）
         train_loader = DataLoader(
             segment='train',
-            data_handler=train_data_handler,
+            data_handler=combined_data_handler,
             factors=self.config['factors'],
             start_date=self.config['train_start'],
             end_date=self.config['train_end'],
@@ -172,10 +169,10 @@ class MLPipeline:
             norm_method=self.config.get('norm_method', 'zscore')
         )
 
-        # 创建验证集 DataLoader
+        # 创建验证集 DataLoader（会从同一个 DataHandler 中筛选验证日期范围的数据）
         valid_loader = DataLoader(
             segment='valid',
-            data_handler=valid_data_handler,
+            data_handler=combined_data_handler,
             factors=self.config['factors'],
             start_date=self.config['valid_start'],
             end_date=self.config['valid_end'],
@@ -199,6 +196,30 @@ class MLPipeline:
         # 获取训练信息
         self.training_info = self.model_trainer.get_training_info()
 
+        # ====== 内存清理 ======
+        logger.info("\n清理训练阶段内存...")
+        # 清理 DataLoader 中的数据
+        if hasattr(train_loader, 'data'):
+            train_loader.data = None
+        if hasattr(valid_loader, 'data'):
+            valid_loader.data = None
+        train_loader = None
+        valid_loader = None
+
+        # 清理 ModelTrainer 中的 DataFrame
+        if hasattr(self.model_trainer, 'train_df'):
+            self.model_trainer.train_df = None
+        if hasattr(self.model_trainer, 'valid_df'):
+            self.model_trainer.valid_df = None
+
+        # 清理 DataHandler
+        combined_data_handler.all_data = None
+        combined_data_handler = None
+
+        # 强制垃圾回收
+        gc.collect()
+        logger.info("✓ 训练阶段内存已清理")
+
         return self.training_info
 
     def run_evaluation(self) -> Dict:
@@ -208,14 +229,14 @@ class MLPipeline:
         Returns:
             评估指标字典
         """
-        print("\n" + "=" * 60)
-        print("第3步：模型评估")
-        print("=" * 60)
+        logger.info("\n" + "=" * 60)
+        logger.info("第3步：模型评估")
+        logger.info("=" * 60)
 
         if self.model is None:
             raise ValueError("模型尚未训练，请先调用run_training()")
 
-        # 创建测试集独立的 DataHandler
+        # 创建测试集 DataHandler
         test_data_handler = DataHandler(
             data_path=self.config['data_path'],
             min_data_points=self.config['min_data_points'],
@@ -248,10 +269,31 @@ class MLPipeline:
         self.evaluation_metrics = self.model_evaluator.calculate_metrics()
 
         # 打印摘要
-        print("\n" + self.model_evaluator.get_evaluation_summary())
+        logger.info("\n" + self.model_evaluator.get_evaluation_summary())
 
         # 保存报告
         report_path = self.model_evaluator.save_evaluation_report(str(self.output_dir))
+
+        # ====== 内存清理 ======
+        logger.info("\n清理评估阶段内存...")
+        # 清理 DataLoader 中的数据
+        if hasattr(test_loader, 'data'):
+            test_loader.data = None
+        test_loader = None
+
+        # 清理 ModelEvaluator 中的数据
+        if hasattr(self.model_evaluator, 'predictions'):
+            self.model_evaluator.predictions = None
+        if hasattr(self.model_evaluator, 'test_loader'):
+            self.model_evaluator.test_loader = None
+
+        # 清理 DataHandler
+        test_data_handler.all_data = None
+        test_data_handler = None
+
+        # 强制垃圾回收
+        gc.collect()
+        logger.info("✓ 评估阶段内存已清理")
 
         return self.evaluation_metrics
 
@@ -262,14 +304,14 @@ class MLPipeline:
         Returns:
             回测结果字典
         """
-        print("\n" + "=" * 60)
-        print("第4步：回测")
-        print("=" * 60)
+        logger.info("\n" + "=" * 60)
+        logger.info("第4步：回测")
+        logger.info("=" * 60)
 
         if self.model is None:
             raise ValueError("模型尚未训练，请先调用run_training()")
 
-        # 创建回测专用的独立 DataHandler
+        # 创建回测专用的 DataHandler
         backtest_data_handler = DataHandler(
             data_path=self.config['data_path'],
             min_data_points=self.config['min_data_points'],
@@ -305,13 +347,24 @@ class MLPipeline:
             verbose=True
         )
 
+        # ====== 内存清理 ======
+        logger.info("\n清理回测阶段内存...")
+        # 注意：不能清理 backtest_engine 和 backtest_results，因为 save_results() 还需要使用
+        # 只清理 DataHandler
+        backtest_data_handler.all_data = None
+        backtest_data_handler = None
+
+        # 强制垃圾回收
+        gc.collect()
+        logger.info("✓ 回测阶段内存已清理")
+
         return self.backtest_results
 
     def save_results(self):
         """保存所有结果"""
-        print("\n" + "=" * 60)
-        print("第5步：保存结果")
-        print("=" * 60)
+        logger.info("\n" + "=" * 60)
+        logger.info("第5步：保存结果")
+        logger.info("=" * 60)
 
         if self.backtest_results is None:
             raise ValueError("回测尚未完成，请先调用run_backtest()")
@@ -327,11 +380,11 @@ class MLPipeline:
         )
 
         # 导出交易记录
-        print("\n导出交易记录...")
+        logger.info("\n导出交易记录...")
         self.report_generator.export_trades_to_csv(self.backtest_results['trades'])
 
         # 导出持仓历史
-        print("导出持仓历史...")
+        logger.info("导出持仓历史...")
         self.report_generator.export_positions_to_csv(
             self.backtest_results['portfolio_history']
         )
@@ -339,27 +392,27 @@ class MLPipeline:
         # 导出交易分析
         trade_analysis = self.backtest_results.get('trade_analysis')
         if trade_analysis:
-            print("导出交易分析...")
+            logger.info("导出交易分析...")
             self.report_generator.export_trade_analysis_to_csv(trade_analysis)
 
         # 导出绩效指标
-        print("导出绩效指标...")
+        logger.info("导出绩效指标...")
         self.report_generator.export_metrics_to_json(
             metrics=metrics,
             trade_analysis=trade_analysis
         )
 
         # 绘制图表
-        print("绘制资金曲线...")
+        logger.info("绘制资金曲线...")
         self.report_generator.plot_equity_curve(
             portfolio_history=self.backtest_results['portfolio_history'],
             save=True,
             show=False
         )
 
-        print("\n" + "=" * 60)
-        print(f"✓ 所有结果已保存到: {self.output_dir}")
-        print("=" * 60)
+        logger.info("\n" + "=" * 60)
+        logger.info(f"✓ 所有结果已保存到: {self.output_dir}")
+        logger.info("=" * 60)
 
     def run(self):
         """
@@ -368,9 +421,9 @@ class MLPipeline:
         Returns:
             包含所有结果的字典
         """
-        print("\n" + "=" * 70)
-        print("机器学习量化交易Pipeline")
-        print("=" * 70)
+        logger.info("\n" + "=" * 70)
+        logger.info("机器学习量化交易Pipeline")
+        logger.info("=" * 70)
 
         # 运行三个阶段
         self.run_training()
