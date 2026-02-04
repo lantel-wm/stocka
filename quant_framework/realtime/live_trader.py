@@ -13,6 +13,7 @@ import pandas as pd
 from ..data.data_handler import DataHandler
 from ..strategy.base_strategy import BaseStrategy, Signal
 from .data_updater import DataUpdater
+from ..utils.constraints import TradingCalendar
 from ..utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -63,6 +64,9 @@ class LiveTrader:
             use_parquet=False,
             delay=0.5
         )
+
+        # 初始化交易日历
+        self.trading_calendar = TradingCalendar()
 
         # 数据处理器（延迟加载）
         self.data_handler: Optional[DataHandler] = None
@@ -140,19 +144,17 @@ class LiveTrader:
             else:
                 logger.info(f"\n[1/5] 使用已加载的数据")
 
-            # 2. 检查目标日期是否为交易日
+            # 2. 检查目标日期是否为交易日（使用交易日历，不依赖数据文件）
             logger.info(f"\n[2/5] 检查交易日...")
-            available_dates = self.data_handler.get_available_dates()
 
-            if target_date not in available_dates:
+            if not self.trading_calendar.is_trading_day(target_date):
                 # 找最近的交易日
-                recent_dates = [d for d in available_dates if d <= target_date]
-                if not recent_dates:
+                actual_date = self.trading_calendar.get_previous_trading_day(target_date)
+                if actual_date is None:
                     result['status'] = 'error'
                     result['message'] = f'没有可用的交易日数据（目标日期：{target_date}）'
                     return result
 
-                actual_date = recent_dates[-1]
                 logger.warning(f"⚠ {target_date} 不是交易日，使用最近的交易日：{actual_date}")
             else:
                 actual_date = target_date
