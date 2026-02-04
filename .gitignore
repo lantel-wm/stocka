@@ -116,3 +116,4 @@ examples/examples/
 examples/reports/
 examples/logs/
 examples/signals/
+examples/*_state.json
