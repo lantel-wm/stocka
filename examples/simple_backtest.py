@@ -17,17 +17,20 @@ from quant_framework import (
     Performance,
     calculate_all_metrics
 )
+from quant_framework.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def main():
     """主函数"""
-    print("=" * 70)
-    print("A股量化回测框架 - 简单回测示例")
-    print("=" * 70)
-    print()
+    logger.info("=" * 70)
+    logger.info("A股量化回测框架 - 简单回测示例")
+    logger.info("=" * 70)
+    logger.info("")
 
     # ==================== 第1步：初始化数据处理器 ====================
-    print("第1步：加载数据...")
+    logger.info("第1步：加载数据...")
     data_handler = DataHandler(
         data_path="../data/factor/day/alpha158",
         min_data_points=50,
@@ -46,25 +49,25 @@ def main():
         backtest_end = "2025-12-31"
         # backtest_end = "2024-02-01"
 
-        print(f"数据加载范围: {data_load_start} 至 {data_load_end}")
-        print(f"回测范围: {backtest_start} 至 {backtest_end}")
+        logger.info(f"数据加载范围: {data_load_start} 至 {data_load_end}")
+        logger.info(f"回测范围: {backtest_start} 至 {backtest_end}")
 
         data_handler.load_data(
             start_date=data_load_start,
             end_date=data_load_end
         )
     except FileNotFoundError as e:
-        print(f"错误：{e}")
-        print("\n请确保数据文件存在于目录")
+        logger.error(f"错误：{e}")
+        logger.error("\n请确保数据文件存在于目录")
         return
     except Exception as e:
-        print(f"加载数据时出错：{e}")
+        logger.error(f"加载数据时出错：{e}")
         return
 
-    print()
+    logger.info("")
 
     # ==================== 第2步：加载benchmark数据（沪深300）====================
-    print("第2步：加载benchmark数据（沪深300）...")
+    logger.info("第2步：加载benchmark数据（沪深300）...")
     benchmark_data = None
     try:
         benchmark_data = data_handler.load_index_data(
@@ -72,33 +75,34 @@ def main():
             start_date=data_load_start,
             end_date=data_load_end
         )
-        print(f"Benchmark数据加载成功！")
-        print(f"  - 日期范围: {benchmark_data['date'].iloc[0]} 至 {benchmark_data['date'].iloc[-1]}")
-        print(f"  - 数据点数: {len(benchmark_data)}")
+        logger.info(f"Benchmark数据加载成功！")
+        logger.info(f"  - 日期范围: {benchmark_data['date'].iloc[0]} 至 {benchmark_data['date'].iloc[-1]}")
+        logger.info(f"  - 数据点数: {len(benchmark_data)}")
     except FileNotFoundError as e:
-        print(f"警告：{e}")
-        print("将不使用benchmark进行对比")
+        logger.warning(f"警告：{e}")
+        logger.warning("将不使用benchmark进行对比")
     except Exception as e:
-        print(f"警告：加载benchmark数据时出错：{e}")
-        print("将不使用benchmark进行对比")
-    print()
+        logger.warning(f"警告：加载benchmark数据时出错：{e}")
+        logger.warning("将不使用benchmark进行对比")
+    logger.info("")
 
     # ==================== 第3步：创建策略 ====================
-    print("第3步：创建策略...")
+    logger.info("第3步：创建策略...")
     strategy = MLStrategy({
-        'model_path': '../examples/lightgbm_model.pkl',
+        # 'model_path': '../examples/lightgbm_model.pkl',
         # 'model_path': '../examples/examples/pipeline_outputs/pipeline_20260131_154340/model.pkl',
+        'model_path': '/home/zzy/projects/stocka/examples/examples/pipeline_outputs/pipeline_20260203_200936/model.pkl',
 
         'rebalance_days': 3,
-        'top_k': 20,
+        'top_k': 10,
         'stop_loss': 0.01,
     })
-    print(f"策略名称: {strategy.name}")
-    print(f"策略参数: {strategy.params}")
-    print()
+    logger.info(f"策略名称: {strategy.name}")
+    logger.info(f"策略参数: {strategy.params}")
+    logger.info("")
 
     # ==================== 第4步：运行回测 ====================
-    print("第4步：运行回测...")
+    logger.info("第4步：运行回测...")
     engine = BacktestEngine(
         data_handler=data_handler,
         strategy=strategy,
@@ -116,7 +120,7 @@ def main():
     )
 
     # ==================== 第5步：绩效分析 ====================
-    print("第5步：计算绩效指标...")
+    logger.info("第5步：计算绩效指标...")
     metrics = calculate_all_metrics(
         portfolio_history=results['portfolio_history'],
         trades=results['trades'],
@@ -129,25 +133,25 @@ def main():
         metrics=metrics,
         trades=results['trades']
     )
-    print("\n" + report)
+    logger.info("\n" + report)
 
     # ==================== 第6步：生成图表和CSV报告（可选）====================
     try:
-        print("生成报告和图表...")
+        logger.info("生成报告和图表...")
         from quant_framework.performance.reports import ReportGenerator
 
         report_gen = ReportGenerator(output_dir="reports")
 
         # 导出交易记录到CSV
-        print("\n导出交易记录...")
+        logger.info("\n导出交易记录...")
         trades_csv = report_gen.export_trades_to_csv(results['trades'])
 
         # 导出持仓历史到CSV
-        print("导出持仓历史...")
+        logger.info("导出持仓历史...")
         history_csv = report_gen.export_positions_to_csv(results['portfolio_history'])
 
         # 导出详细持仓到CSV
-        print("导出详细持仓...")
+        logger.info("导出详细持仓...")
         detailed_csv = report_gen.export_detailed_positions_to_csv(
             portfolio=engine.portfolio,
             data_handler=data_handler,
@@ -156,20 +160,20 @@ def main():
         )
 
         # 导出绩效指标到JSON（包含交易统计）
-        print("导出绩效指标...")
+        logger.info("导出绩效指标...")
         metrics_json = report_gen.export_metrics_to_json(
             metrics=metrics,
             trade_analysis=results.get('trade_analysis')
         )
 
         # 导出交易分析详情到CSV
-        print("导出交易分析...")
+        logger.info("导出交易分析...")
         analysis_csv = report_gen.export_trade_analysis_to_csv(
             trade_analysis=results.get('trade_analysis', {})
         )
 
         # 绘制资金曲线
-        print("绘制资金曲线...")
+        logger.info("绘制资金曲线...")
         report_gen.plot_equity_curve(
             portfolio_history=results['portfolio_history'],
             benchmark_history=results.get('benchmark_history'),  # 传递benchmark数据
@@ -178,7 +182,7 @@ def main():
         )
 
         # 绘制收益率分布
-        print("绘制收益率分布...")
+        logger.info("绘制收益率分布...")
         report_gen.plot_returns_distribution(
             portfolio_history=results['portfolio_history'],
             save=True,
@@ -186,14 +190,14 @@ def main():
         )
 
     except Exception as e:
-        print(f"生成报告时出错：{e}")
+        logger.error(f"生成报告时出错：{e}")
         import traceback
         traceback.print_exc()
 
-    print()
-    print("=" * 70)
-    print("回测完成！")
-    print("=" * 70)
+    logger.info("")
+    logger.info("=" * 70)
+    logger.info("回测完成！")
+    logger.info("=" * 70)
 
 
 if __name__ == "__main__":

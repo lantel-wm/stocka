@@ -20,6 +20,9 @@ from quant_framework import (
     StandardCost
 )
 from quant_framework.strategy.indicators import Indicators
+from quant_framework.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class BreakoutStrategy(BaseStrategy):
@@ -190,13 +193,13 @@ class MomentumStrategy(BaseStrategy):
 
 def main():
     """主函数"""
-    print("=" * 70)
-    print("自定义策略示例")
-    print("=" * 70)
-    print()
+    logger.info("=" * 70)
+    logger.info("自定义策略示例")
+    logger.info("=" * 70)
+    logger.info("")
 
     # 加载数据
-    print("加载数据...")
+    logger.info("加载数据...")
     data_handler = DataHandler(
         data_path="data/stock/kline/day",
         min_data_points=100
@@ -208,12 +211,12 @@ def main():
             end_date="2023-12-31"
         )
     except Exception as e:
-        print(f"加载数据失败：{e}")
+        logger.error(f"加载数据失败：{e}")
         return
 
     # 示例1：突破策略
-    print("\n示例1：突破策略回测")
-    print("-" * 70)
+    logger.info("\n示例1：突破策略回测")
+    logger.info("-" * 70)
 
     strategy1 = BreakoutStrategy({
         'lookback_period': 20,
@@ -234,13 +237,13 @@ def main():
         verbose=False
     )
 
-    print(f"最终权益: {results1['final_value']:,.2f} 元")
-    print(f"总收益率: {results1['total_return']*100:.2f}%")
-    print(f"交易次数: {len(results1['trades'])}")
+    logger.info(f"最终权益: {results1['final_value']:,.2f} 元")
+    logger.info(f"总收益率: {results1['total_return']*100:.2f}%")
+    logger.info(f"交易次数: {len(results1['trades'])}")
 
     # 示例2：动量策略
-    print("\n示例2：动量策略回测")
-    print("-" * 70)
+    logger.info("\n示例2：动量策略回测")
+    logger.info("-" * 70)
 
     strategy2 = MomentumStrategy({
         'rsi_period': 14,
@@ -262,13 +265,13 @@ def main():
         verbose=False
     )
 
-    print(f"最终权益: {results2['final_value']:,.2f} 元")
-    print(f"总收益率: {results2['total_return']*100:.2f}%")
-    print(f"交易次数: {len(results2['trades'])}")
+    logger.info(f"最终权益: {results2['final_value']:,.2f} 元")
+    logger.info(f"总收益率: {results2['total_return']*100:.2f}%")
+    logger.info(f"交易次数: {len(results2['trades'])}")
 
-    print("\n" + "=" * 70)
-    print("自定义策略示例完成！")
-    print("=" * 70)
+    logger.info("\n" + "=" * 70)
+    logger.info("自定义策略示例完成！")
+    logger.info("=" * 70)
 
 
 if __name__ == "__main__":

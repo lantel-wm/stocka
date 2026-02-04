@@ -1,7 +1,8 @@
 import sys
 import os
 
-STOCKA_BASE_DIR = '/Users/zhaozhiyu/Projects/stocka'
+# STOCKA_BASE_DIR = '/Users/zhaozhiyu/Projects/stocka'
+STOCKA_BASE_DIR = '/home/zzy/projects/stocka'
 sys.path.insert(0, STOCKA_BASE_DIR)
 
 from quant_framework import (
@@ -10,6 +11,9 @@ from quant_framework import (
     MultiFactorAnalysis,
     Alpha158
 )
+from quant_framework.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 import pandas as pd
 import numpy as np
@@ -43,7 +47,7 @@ def _process_single_stock(code, data_path, min_data_points, date, save_dir):
         )
         
         data_handler.load_data(
-            start_date="2015-01-05",
+            start_date="2005-01-01",
             end_date="2025-12-31"
         )
         
@@ -101,10 +105,10 @@ def calculate_factor_values(data_handler, codes, dates, save_dir=None, num_worke
     # 确定使用的CPU核心数
     if num_workers is None:
         num_workers = mp.cpu_count()
-    
-    print(f"使用 {num_workers} 个 CPU 核心进行并行计算...")
-    print(f"待计算股票数量: {len(codes)}")
-    
+
+    logger.info(f"使用 {num_workers} 个 CPU 核心进行并行计算...")
+    logger.info(f"待计算股票数量: {len(codes)}")
+
     # 准备工作函数的固定参数
     worker_func = partial(
         _process_single_stock,
@@ -113,10 +117,10 @@ def calculate_factor_values(data_handler, codes, dates, save_dir=None, num_worke
         date=date,
         save_dir=save_dir
     )
-    
+
     # 使用进程池并行计算
     factor_dfs = {}
-    
+
     # 使用 imap_unordered 以获得流式结果
     with mp.Pool(processes=num_workers) as pool:
         # 使用 tqdm 显示进度
@@ -125,15 +129,15 @@ def calculate_factor_values(data_handler, codes, dates, save_dir=None, num_worke
             total=len(codes),
             desc="计算因子进度"
         ))
-    
+
     # 整理结果
     success_count = 0
     for code, factor_df in results:
         if factor_df is not None:
             factor_dfs[code] = factor_df
             success_count += 1
-    
-    print(f"计算完成！成功: {success_count}/{len(codes)}")
+
+    logger.info(f"计算完成！成功: {success_count}/{len(codes)}")
     
     return factor_dfs
 
@@ -163,30 +167,30 @@ if __name__ == '__main__':
             start_date="2015-01-05",
             end_date="2025-12-31"
         )
-        print(f"数据加载成功，股票数量: {len(data_handler.get_all_codes())}")
-        print()
+        logger.info(f"数据加载成功，股票数量: {len(data_handler.get_all_codes())}")
+        logger.info("")
 
     except Exception as e:
-        print(f"加载数据时出错：{e}")
-        
+        logger.error(f"加载数据时出错：{e}")
+
     # 获取交易日期
     dates = data_handler.get_available_dates()
-    dates = [d for d in dates if pd.to_datetime('2015-01-05').to_pydatetime().date() <= d <= pd.to_datetime('2025-12-31').to_pydatetime().date()]
+    dates = [d for d in dates if pd.to_datetime('2005-01-01').to_pydatetime().date() <= d <= pd.to_datetime('2025-12-31').to_pydatetime().date()]
 
-    print(f"分析时间范围: {dates[0]} 至 {dates[-1]}")
-    print(f"交易日数: {len(dates)}")
-        
+    logger.info(f"分析时间范围: {dates[0]} 至 {dates[-1]}")
+    logger.info(f"交易日数: {len(dates)}")
+
     # 计算所有因子
-    print(f"计算Alpha158因子...")
+    logger.info(f"计算Alpha158因子...")
     # factor_dfs = calculate_factor_values(data_handler, stock_list, dates)
     factor_dfs = calculate_factor_values(
-        data_handler, 
-        data_handler.get_all_codes(), 
-        dates, 
+        data_handler,
+        data_handler.get_all_codes(),
+        dates,
         os.path.join(STOCKA_BASE_DIR, 'data/factor/day/alpha158'),
-        num_workers=10,
+        num_workers=32,
     )
 
-    print()
-    print("所有因子计算完成！")
-    print()
+    logger.info("")
+    logger.info("所有因子计算完成！")
+    logger.info("")

@@ -8,6 +8,9 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from quant_framework import MLPipeline
+from quant_framework.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def main():
@@ -28,8 +31,8 @@ def main():
         'min_data_points': 50,
 
         # ==================== 日期配置 ====================
-        # 训练集：2015-2022年
-        'train_start': '2015-04-07',
+        # 训练集：2005-2022年
+        'train_start': '2005-05-01',
         'train_end': '2021-12-31',
 
         # 验证集：2022-2023年
@@ -50,7 +53,7 @@ def main():
             'num_boost_round': 1000,
             'early_stopping_rounds': 50,
             "colsample_bytree": 0.8879,
-            "learning_rate": 0.0421,
+            "learning_rate": 0.01,
             "subsample": 0.8789,
             "lambda_l1": 205.6999,
             "lambda_l2": 580.9768,
@@ -62,9 +65,9 @@ def main():
         # ==================== 策略配置 ====================
         'strategy_params': {
             'top_k': 10,  # 选取预测分数最高的10只股票
-            'rebalance_days': 7,  # 每7个交易日调仓一次
+            'rebalance_days': 3,  # 每7个交易日调仓一次
             'weight_method': 'equal',  # 等权重
-            'stop_loss': 0.03,  # 3%止损
+            'stop_loss': 0.01,  # 3%止损
             'stop_loss_check_daily': True,  # 每日检查止损
         },
 
@@ -75,61 +78,61 @@ def main():
         },
     }
 
-    print("=" * 70)
-    print("机器学习量化交易Pipeline示例")
-    print("=" * 70)
-    print()
+    logger.info("=" * 70)
+    logger.info("机器学习量化交易Pipeline示例")
+    logger.info("=" * 70)
+    logger.info("")
 
     # 创建Pipeline
     pipeline = MLPipeline(config)
 
     # ==================== 方式1：一键运行完整流程 ====================
-    print("\n【方式1】一键运行完整流程")
+    logger.info("\n【方式1】一键运行完整流程")
     results = pipeline.run()
 
     # ==================== 方式2：分步运行 ====================
-    # print("\n【方式2】分步运行")
+    # logger.info("\n【方式2】分步运行")
     # pipeline.run_training()      # 1. 训练模型
     # pipeline.run_evaluation()    # 2. 评估模型
     # pipeline.run_backtest()      # 3. 回测
     # pipeline.save_results()      # 4. 保存结果
 
     # ==================== 获取结果 ====================
-    print("\n" + "=" * 70)
-    print("Pipeline执行完成！")
-    print("=" * 70)
+    logger.info("\n" + "=" * 70)
+    logger.info("Pipeline执行完成！")
+    logger.info("=" * 70)
 
     results = pipeline.get_results()
 
-    print(f"\n输出目录: {results['output_dir']}")
+    logger.info(f"\n输出目录: {results['output_dir']}")
 
-    print("\n--- 训练信息 ---")
+    logger.info("\n--- 训练信息 ---")
     training_info = results['training_info']
-    print(f"状态: {training_info['status']}")
-    print(f"训练样本数: {training_info.get('train_samples', 0):,}")
-    print(f"验证样本数: {training_info.get('valid_samples', 0):,}")
+    logger.info(f"状态: {training_info['status']}")
+    logger.info(f"训练样本数: {training_info.get('train_samples', 0):,}")
+    logger.info(f"验证样本数: {training_info.get('valid_samples', 0):,}")
 
-    print("\n--- 评估指标 ---")
+    logger.info("\n--- 评估指标 ---")
     eval_metrics = results['evaluation_metrics']
-    print(f"IC均值: {eval_metrics.get('IC_mean', 0):.4f}")
-    print(f"IC_IR: {eval_metrics.get('IC_IR', 0):.4f}")
-    print(f"RankIC均值: {eval_metrics.get('RankIC_mean', 0):.4f}")
-    print(f"RankIC_IR: {eval_metrics.get('RankIC_IR', 0):.4f}")
+    logger.info(f"IC均值: {eval_metrics.get('IC_mean', 0):.4f}")
+    logger.info(f"IC_IR: {eval_metrics.get('IC_IR', 0):.4f}")
+    logger.info(f"RankIC均值: {eval_metrics.get('RankIC_mean', 0):.4f}")
+    logger.info(f"RankIC_IR: {eval_metrics.get('RankIC_IR', 0):.4f}")
 
-    print("\n--- 回测结果 ---")
+    logger.info("\n--- 回测结果 ---")
     backtest_results = results['backtest_results']
-    print(f"最终权益: {backtest_results['final_value']:,.2f} 元")
-    print(f"总收益率: {backtest_results['total_return']*100:.2f}%")
+    logger.info(f"最终权益: {backtest_results['final_value']:,.2f} 元")
+    logger.info(f"总收益率: {backtest_results['total_return']*100:.2f}%")
 
     trade_analysis = backtest_results.get('trade_analysis', {})
     if trade_analysis and trade_analysis.get('completed_trades', 0) > 0:
-        print(f"完整交易: {trade_analysis['completed_trades']} 笔")
-        print(f"胜率: {trade_analysis['win_rate']:.2f}%")
-        print(f"盈亏比: {trade_analysis['profit_loss_ratio']:.2f}")
+        logger.info(f"完整交易: {trade_analysis['completed_trades']} 笔")
+        logger.info(f"胜率: {trade_analysis['win_rate']:.2f}%")
+        logger.info(f"盈亏比: {trade_analysis['profit_loss_ratio']:.2f}")
 
-    print("\n" + "=" * 70)
-    print("所有报告和图表已保存到输出目录")
-    print("=" * 70)
+    logger.info("\n" + "=" * 70)
+    logger.info("所有报告和图表已保存到输出目录")
+    logger.info("=" * 70)
 
 
 if __name__ == "__main__":

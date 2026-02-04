@@ -5,14 +5,19 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 from datetime import date
 from quant_framework import MLStrategy, LiveTrader
+from quant_framework.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 STOCKA_BASE_DIR = "/home/zzy/projects/stocka"
 
 # 1. 创建策略
 strategy = MLStrategy(params={
     'model_path': os.path.join(STOCKA_BASE_DIR, 'examples/lightgbm_model.pkl'),
-    'top_k': 20,
+    'top_k': 10,
     'rebalance_days': 3,
+    'stop_loss': 0.01,
+    'stop_loss_check_daily': True,
 })
 
 # 2. 创建实盘交易调度器
@@ -29,4 +34,4 @@ result = trader.run_with_update(
 )
 
 # 4. 查看结果
-print(f"生成 {result['run_result']['signals_generated']} 个信号")
+logger.info(f"生成 {result['run_result']['signals_generated']} 个信号")
