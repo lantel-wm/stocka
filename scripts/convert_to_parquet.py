@@ -19,6 +19,10 @@ project_root = Path(__file__).parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
+from quant_framework.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
 
 def convert_single_csv(args):
     """转换单个CSV文件为Parquet"""
@@ -42,7 +46,7 @@ def convert_single_csv(args):
 
         return True
     except Exception as e:
-        print(f"转换失败 {csv_path}: {e}")
+        logger.error(f"转换失败 {csv_path}: {e}")
         return False
 
 
@@ -65,11 +69,11 @@ def convert_csv_to_parquet(data_dir, output_dir=None, num_workers=None):
     csv_files = glob.glob(os.path.join(data_dir, "*.csv"))
 
     if not csv_files:
-        print(f"未找到CSV文件: {data_dir}")
+        logger.error(f"未找到CSV文件: {data_dir}")
         return
 
-    print(f"找到 {len(csv_files)} 个CSV文件")
-    print(f"输出目录: {output_dir}")
+    logger.info(f"找到 {len(csv_files)} 个CSV文件")
+    logger.info(f"输出目录: {output_dir}")
 
     # 设置并行进程数
     if num_workers is None:
@@ -79,7 +83,7 @@ def convert_csv_to_parquet(data_dir, output_dir=None, num_workers=None):
     args_list = [(csv_path, output_dir) for csv_path in csv_files]
 
     # 使用多进程并行转换
-    print(f"使用 {num_workers} 个进程进行转换...")
+    logger.info(f"使用 {num_workers} 个进程进行转换...")
     with Pool(num_workers) as pool:
         results = list(tqdm(
             pool.imap(convert_single_csv, args_list),
@@ -88,9 +92,9 @@ def convert_csv_to_parquet(data_dir, output_dir=None, num_workers=None):
         ))
 
     success_count = sum(results)
-    print(f"\n转换完成！")
-    print(f"成功: {success_count}/{len(csv_files)}")
-    print(f"失败: {len(csv_files) - success_count}/{len(csv_files)}")
+    logger.info(f"\n转换完成！")
+    logger.info(f"成功: {success_count}/{len(csv_files)}")
+    logger.info(f"失败: {len(csv_files) - success_count}/{len(csv_files)}")
 
     # 比较文件大小
     original_size = sum(os.path.getsize(f) for f in csv_files) / (1024**3)
@@ -100,10 +104,10 @@ def convert_csv_to_parquet(data_dir, output_dir=None, num_workers=None):
         if os.path.exists(os.path.join(output_dir, f.replace('.csv', '.parquet')))
     ) / (1024**3)
 
-    print(f"\n存储空间对比:")
-    print(f"  CSV总大小:  {original_size:.2f} GB")
-    print(f"  Parquet总大小: {parquet_size:.2f} GB")
-    print(f"  压缩率: {((1 - parquet_size/original_size) * 100):.1f}%")
+    logger.info(f"\n存储空间对比:")
+    logger.info(f"  CSV总大小:  {original_size:.2f} GB")
+    logger.info(f"  Parquet总大小: {parquet_size:.2f} GB")
+    logger.info(f"  压缩率: {((1 - parquet_size/original_size) * 100):.1f}%")
 
 
 if __name__ == '__main__':
