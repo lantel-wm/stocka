@@ -4,6 +4,7 @@
 """
 
 import logging
+import os
 import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -17,6 +18,10 @@ DEFAULT_DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
 DEFAULT_LOG_FILE = 'logs/quant_framework.log'
 DEFAULT_MAX_BYTES = 10 * 1024 * 1024  # 10MB
 DEFAULT_BACKUP_COUNT = 5
+
+# 环境变量名称
+ENV_LOG_FILE = 'STOCKA_LOG_FILE'
+ENV_LOG_LEVEL = 'STOCKA_LOG_LEVEL'
 
 
 # 存储已配置的loggers
@@ -36,8 +41,8 @@ def setup_logger(
 
     Args:
         name: logger名称，通常使用__name__
-        level: 日志级别，默认为INFO
-        log_file: 日志文件路径，None则不输出到文件
+        level: 日志级别，默认为INFO。也可通过环境变量STOCKA_LOG_LEVEL设置
+        log_file: 日志文件路径，None则使用环境变量STOCKA_LOG_FILE（如果设置）
         console: 是否输出到控制台，默认True
         max_bytes: 日志文件最大大小，默认10MB
         backup_count: 保留的备份文件数量，默认5
@@ -49,12 +54,26 @@ def setup_logger(
         >>> from quant_framework.utils.logger import get_logger
         >>> logger = get_logger(__name__)
         >>> logger.info("This is an info message")
+
+    使用环境变量:
+        >>> # 在shell中设置环境变量
+        >>> export STOCKA_LOG_FILE='logs/app.log'
+        >>> export STOCKA_LOG_LEVEL='DEBUG'
+        >>> # 所有模块的日志都会输出到logs/app.log
     """
     logger = logging.getLogger(name)
 
     # 如果已经配置过，直接返回
     if name in _configured_loggers:
         return logger
+
+    # 优先使用环境变量的配置
+    if log_file is None and ENV_LOG_FILE in os.environ:
+        log_file = os.environ[ENV_LOG_FILE]
+
+    if level is None and ENV_LOG_LEVEL in os.environ:
+        level_str = os.environ[ENV_LOG_LEVEL].upper()
+        level = getattr(logging, level_str, DEFAULT_LOG_LEVEL)
 
     # 设置日志级别
     log_level = level or DEFAULT_LOG_LEVEL
