@@ -6,7 +6,7 @@
 import logging
 import os
 import sys
-from logging.handlers import RotatingFileHandler
+from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 from typing import Optional
 
@@ -16,8 +16,10 @@ DEFAULT_LOG_LEVEL = logging.INFO
 DEFAULT_LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s'
 DEFAULT_DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
 DEFAULT_LOG_FILE = 'logs/quant_framework.log'
-DEFAULT_MAX_BYTES = 10 * 1024 * 1024  # 10MB
-DEFAULT_BACKUP_COUNT = 5
+# 按天分割配置
+DEFAULT_WHEN = 'midnight'  # 每天午夜轮转
+DEFAULT_INTERVAL = 1  # 每1天轮转一次
+DEFAULT_BACKUP_COUNT = 0  # 0表示永久保留所有日志文件
 
 # 环境变量名称
 ENV_LOG_FILE = 'STOCKA_LOG_FILE'
@@ -33,7 +35,8 @@ def setup_logger(
     level: Optional[int] = None,
     log_file: Optional[str] = None,
     console: bool = True,
-    max_bytes: int = DEFAULT_MAX_BYTES,
+    when: str = DEFAULT_WHEN,
+    interval: int = DEFAULT_INTERVAL,
     backup_count: int = DEFAULT_BACKUP_COUNT
 ) -> logging.Logger:
     """
@@ -44,8 +47,10 @@ def setup_logger(
         level: 日志级别，默认为INFO。也可通过环境变量STOCKA_LOG_LEVEL设置
         log_file: 日志文件路径，None则使用环境变量STOCKA_LOG_FILE（如果设置）
         console: 是否输出到控制台，默认True
-        max_bytes: 日志文件最大大小，默认10MB
-        backup_count: 保留的备份文件数量，默认5
+        when: 日志轮转时间单位，默认'midnight'（每天午夜轮转）。
+              可选值: 'S'(秒), 'M'(分), 'H'(小时), 'D'(天), 'midnight'(午夜), 'W'(周)
+        interval: 轮转间隔，默认1（配合when使用，如when='D', interval=1表示每天轮转）
+        backup_count: 保留的备份文件数量，默认0（永久保留所有历史日志）
 
     Returns:
         配置好的logger实例
@@ -54,6 +59,10 @@ def setup_logger(
         >>> from quant_framework.utils.logger import get_logger
         >>> logger = get_logger(__name__)
         >>> logger.info("This is an info message")
+
+    日志文件按天分割:
+        >>> # 默认配置下，日志文件会按天分割
+        >>> # 文件名格式: quant_framework.log, quant_framework.log.2026-02-05, quant_framework.log.2026-02-04, ...
 
     使用环境变量:
         >>> # 在shell中设置环境变量
@@ -101,14 +110,16 @@ def setup_logger(
         # 创建日志目录
         log_path.parent.mkdir(parents=True, exist_ok=True)
 
-        file_handler = RotatingFileHandler(
+        file_handler = TimedRotatingFileHandler(
             log_file,
-            maxBytes=max_bytes,
+            when=when,
+            interval=interval,
             backupCount=backup_count,
             encoding='utf-8'
         )
         file_handler.setLevel(log_level)
         file_handler.setFormatter(formatter)
+        file_handler.suffix = '%Y-%m-%d'  # 设置日志文件后缀格式
         logger.addHandler(file_handler)
 
     # 防止日志传播到父logger
