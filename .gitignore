@@ -108,6 +108,7 @@ Desktop.ini
 backtest_results/
 strategy_results/
 *.cache
+ckpt/
 
 # data
 data/
