@@ -12,9 +12,57 @@ from pathlib import Path
 from ..data.data_handler import DataHandler
 from .base_strategy import BaseStrategy, Signal
 from ..model import LGBModel
+from ..factor.alpha158 import Alpha158
 from ..utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+def _calculate_single_stock_factors(stock_data, factor_calculator, prediction_ts, code, min_history_length):
+    """
+    计算单只股票的因子（独立函数，可在多进程中调用）
+
+    Args:
+        stock_data: 股票历史数据 (DataFrame with date index)
+        factor_calculator: Alpha158 因子计算器实例
+        prediction_ts: 预测日期（pd.Timestamp）
+        code: 股票代码
+        min_history_length: 最小历史数据长度要求
+
+    Returns:
+        tuple: (code, factor_data) 或 (code, None) 如果失败
+            - code: 股票代码
+            - factor_data: 包含因子的 DataFrame (如果成功) 或 None (如果失败)
+    """
+    try:
+        # 检查历史数据是否足够
+        if len(stock_data) < min_history_length:
+            return (code, None)
+
+        # 检查是否有 prediction_date 的数据
+        if prediction_ts not in stock_data.index:
+            return (code, None)
+
+        # 重置索引，使 date 成为列
+        stock_data_reset = stock_data.reset_index()
+
+        # 计算因子
+        factor_data = factor_calculator.calculate(stock_data_reset)
+
+        # 提取 prediction_ts 的数据
+        daily_factor = factor_data[factor_data['date'] == prediction_ts]
+
+        if len(daily_factor) == 0:
+            return (code, None)
+
+        # 设置股票代码
+        daily_factor = daily_factor.copy()
+        daily_factor['stock_code'] = code
+
+        return (code, daily_factor)
+
+    except Exception:
+        return (code, None)
 
 
 class CSZScoreNorm:
@@ -129,6 +177,11 @@ class MLStrategy(BaseStrategy):
 
         # 初始化标准化器
         self.normalizer = CSZScoreNorm(factors=self.factors, method=self.params['norm_method'])
+
+        # 初始化因子计算器（用于实盘时实时计算因子）
+        self.factor_calculator = Alpha158()
+        # Alpha158 最长窗口为 60 天，需要至少 60 天的历史数据
+        self.min_history_length = 60
 
         logger.info(f"模型加载成功")
         logger.info(f"  - 因子数量: {len(self.factors)}")
@@ -297,12 +350,19 @@ class MLStrategy(BaseStrategy):
 
             # 检查因子列是否存在
             missing_factors = set(self.factors) - set(daily_data.columns)
-            if missing_factors:
-                logger.warning(f"以下因子列不存在: {missing_factors}")
-                return None
 
-            # 复制数据, 避免修改原始数据
-            pred_data = daily_data.copy()
+            if missing_factors:
+                # 因子不存在，需要实时计算
+                logger.info(f"{current_date} (使用{prediction_date}的数据): 检测到 {len(missing_factors)} 个因子列不存在，开始实时计算...")
+                pred_data = self._calculate_factors_realtime(
+                    data_handler, prediction_date, stock_pool
+                )
+            else:
+                # 因子已存在，直接使用
+                pred_data = daily_data.copy()
+
+            if pred_data is None or len(pred_data) == 0:
+                return None
 
             # 过滤掉 close 为 NaN 的股票
             pred_data = pred_data[~pred_data['close'].isna()]
@@ -324,6 +384,145 @@ class MLStrategy(BaseStrategy):
             import traceback
             traceback.print_exc()
             return None
+
+    def _calculate_factors_realtime(self, data_handler: DataHandler, prediction_date: date,
+                                    stock_pool: List[str]) -> Optional[pd.DataFrame]:
+        """
+        实时计算因子值（用于实盘交易）- 多进程并行版本
+
+        使用多进程并行计算所有股票的因子，显著提升性能
+
+        Args:
+            data_handler: 数据处理器
+            prediction_date: 预测日期（使用该日期的数据进行预测）
+            stock_pool: 股票池
+
+        Returns:
+            包含因子值的 DataFrame，索引为股票代码
+        """
+        import time
+        import multiprocessing as mp
+        from multiprocessing import Pool
+        from tqdm import tqdm
+
+        start_time = time.time()
+        prediction_ts = pd.Timestamp(prediction_date)
+
+        # 确定进程数
+        num_cpus = mp.cpu_count()
+        num_processes = max(1, num_cpus - 1)  # 保留一个核心给系统
+
+        logger.info(f"开始为 {len(stock_pool)} 只股票并行计算因子（多进程模式）...")
+        logger.info(f"  - 预测日期: {prediction_date}")
+        logger.info(f"  - CPU核心数: {num_cpus}")
+        logger.info(f"  - 使用进程数: {num_processes}")
+
+        # 第一步：批量加载所有股票的历史数据
+        logger.info(f"[1/3] 批量加载股票历史数据...")
+        load_start = time.time()
+
+        tasks = []  # 存储 (stock_data, factor_calculator, prediction_ts, code, min_history_length)
+        skipped_count = 0
+        loaded_count = 0
+
+        for code in stock_pool:
+            try:
+                stock_data = data_handler.get_data_before(code, prediction_date)
+
+                if stock_data is None or len(stock_data) == 0:
+                    skipped_count += 1
+                    continue
+
+                # 检查历史数据是否足够
+                if len(stock_data) < self.min_history_length:
+                    skipped_count += 1
+                    continue
+
+                # 检查是否有 prediction_date 的数据
+                if prediction_ts not in stock_data.index:
+                    skipped_count += 1
+                    continue
+
+                # 准备任务参数（使用 starmap 时会自动解包）
+                tasks.append((stock_data, self.factor_calculator, prediction_ts, code, self.min_history_length))
+                loaded_count += 1
+
+            except Exception:
+                skipped_count += 1
+                continue
+
+        load_time = time.time() - load_start
+        logger.info(f"  ✓ 加载完成: {loaded_count} 只股票成功, {skipped_count} 只跳过 (耗时: {load_time:.2f}秒)")
+
+        if not tasks:
+            logger.error(f"没有成功加载任何股票的数据")
+            return None
+
+        # 第二步：多进程并行计算因子
+        logger.info(f"[2/3] 并行计算 Alpha158 因子（{num_processes} 进程）...")
+        calc_start = time.time()
+
+        all_factor_data = []
+
+        try:
+            with Pool(processes=num_processes) as pool:
+                # 使用 starmap 自动解包参数
+                # imap 可以显示进度，但不会按顺序返回
+                results = list(tqdm(
+                    pool.starmap(_calculate_single_stock_factors, tasks),
+                    total=len(tasks),
+                    desc="计算因子",
+                    unit="股"
+                ))
+
+            # 分离成功和失败的结果
+            for code, factor_data in results:
+                if factor_data is not None:
+                    all_factor_data.append(factor_data)
+
+        except Exception as e:
+            logger.error(f"多进程计算出错: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+        calc_time = time.time() - calc_start
+        success_count = len(all_factor_data)
+        logger.info(f"  ✓ 因子计算完成: {success_count} 只股票成功 (耗时: {calc_time:.2f}秒)")
+
+        if not all_factor_data:
+            logger.error(f"没有成功计算任何股票的因子")
+            return None
+
+        # 第三步：合并结果
+        logger.info(f"[3/3] 合并结果...")
+        merge_start = time.time()
+
+        # 合并所有因子数据
+        all_factors = pd.concat(all_factor_data, ignore_index=True)
+
+        # 设置索引为股票代码
+        pred_data = all_factors.set_index('stock_code')
+        pred_data.index.name = 'code'
+
+        # 删除 date 列（已经不需要了）
+        if 'date' in pred_data.columns:
+            pred_data = pred_data.drop(columns=['date'])
+
+        merge_time = time.time() - merge_start
+        logger.info(f"  ✓ 合并完成 (耗时: {merge_time:.2f}秒)")
+
+        # 总耗时统计
+        total_time = time.time() - start_time
+        logger.info(f"✓ 多进程因子计算完成！")
+        logger.info(f"  - 总耗时: {total_time:.2f}秒 ({total_time/60:.1f}分钟)")
+        logger.info(f"  - 成功: {len(pred_data)} 只")
+        logger.info(f"  - 跳过: {skipped_count} 只")
+        logger.info(f"  - 平均速度: {total_time/len(pred_data):.3f}秒/股")
+        logger.info(f"  - 理论加速比: {num_processes}x")
+        logger.info(f"  - 实际加速比: {9.64 / (total_time/len(pred_data)):.1f}x (相比原版9.64秒/股)")
+
+        return pred_data
 
     def _select_stocks(self, predictions: pd.Series, pred_data: pd.DataFrame) -> List[Dict]:
         """
