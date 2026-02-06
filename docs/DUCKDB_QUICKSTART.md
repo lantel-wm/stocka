@@ -149,11 +149,81 @@ cp data/stock.db data/stock_backup.db
 cp data/stock_backup.db data/stock.db
 ```
 
+## 因子数据管理
+
+### 初始化因子表
+
+在 stock.db 中创建因子表结构并注册 Alpha158 因子定义：
+
+```bash
+python scripts/init_factor_tables.py --db-path data/stock.db
+```
+
+### 迁移因子数据
+
+将 Parquet 格式的因子数据迁移到数据库：
+
+```bash
+python scripts/migrate_parquet_factors.py \
+    --source data/factor/day/alpha158 \
+    --db data/stock.db \
+    --workers 8
+```
+
+### 使用因子功能
+
+```python
+from quant_framework.data.data_handler import DataHandler
+from datetime import date
+
+handler = DataHandler('data/stock.db')
+
+# 初始化因子表（首次使用）
+handler._init_factor_tables()
+
+# 注册因子定义
+handler.register_factor('MA5', 'alpha158', '5日移动平均')
+
+# 保存因子值
+factor_df = pd.DataFrame({
+    'MA5': [1.02, 0.98, 1.01],
+    'MA10': [0.99, 1.02, 0.97]
+}, index=['000001', '000002', '600000'])
+
+handler.save_factors(factor_df, date(2024, 1, 10))
+
+# 查询截面因子（某日所有股票的因子）
+cross_section = handler.get_factor_cross_section(
+    date(2024, 1, 10),
+    factor_names=['MA5', 'MA10']
+)
+
+# 查询时序因子（某股票的历史因子）
+stock_factors = handler.get_stock_factors(
+    '000001',
+    factor_names=['MA5', 'MA10'],
+    start_date=date(2024, 1, 1),
+    end_date=date(2024, 1, 31)
+)
+
+# 查询宽表格式（用于ML预测）
+wide_df = handler.get_factors_wide(
+    trade_date=date(2024, 1, 10),
+    stock_codes=['000001', '000002'],
+    factor_names=['MA5', 'MA10']
+)
+
+# 获取因子定义信息
+factor_info = handler.get_factor_info()
+print(factor_info)
+```
+
 ## 下一步
 
 - 阅读详细文档: [DuckDB迁移指南](DUCKDB_MIGRATION.md)
 - 运行性能测试: `python scripts/benchmark_duckdb.py`
 - 查看代码示例: `examples/duckdb_example.py`
+- 运行单元测试: `pytest tests/test_factor_handler.py -v`
 
 ## 问题排查
 
