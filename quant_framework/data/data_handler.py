@@ -1,251 +1,78 @@
 """
 数据管理模块
 负责加载、清洗和管理A股日线数据
-支持CSV和Parquet格式，支持多进程并行加载
+基于DuckDB数据库，提供高性能查询接口
 """
 
 import os
-import glob
 from datetime import date
 from typing import Optional, List, Dict
 import pandas as pd
-from multiprocessing import Pool
-from tqdm import tqdm
+import duckdb
 
 
 class DataHandler:
     """
     数据处理器类
-    从CSV/Parquet文件加载A股日线数据，提供数据查询接口
-    支持自动格式检测和多进程并行加载
+    基于DuckDB数据库加载A股日线数据，提供数据查询接口
+    提供高性能查询和复杂SQL支持
+
+    注意: 初始化后即可直接使用，无需调用load_data()
     """
-
-    # 列名映射（中文 -> 英文字段名）
-    COLUMN_MAP = {
-        '日期': 'date',
-        '股票代码': 'code',
-        '开盘': 'open',
-        '收盘': 'close',
-        '最高': 'high',
-        '最低': 'low',
-        '成交量': 'volume',
-        '成交额': 'amount',
-        '振幅': 'amplitude',
-        '涨跌幅': 'pct_change',
-        '涨跌额': 'change_amount',
-        '换手率': 'turnover'
-    }
-
-    # 反向映射（英文 -> 中文）
-    COLUMN_MAP_REVERSE = {v: k for k, v in COLUMN_MAP.items()}
-
-    def __init__(self, data_path: str, min_data_points: int = 100,
-                 stock_whitelist: Optional[List[str]] = None,
-                 use_parquet: Optional[bool] = None,
-                 num_workers: int = 1):
+    def __init__(self, db_path: str, table_name: str = 'stock_prices',
+                 stock_whitelist: Optional[List[str]] = None):
         """
         初始化数据处理器
 
         Args:
-            data_path: 数据文件所在目录
-            min_data_points: 最少数据点数，用于过滤股票
-            stock_whitelist: 股票白名单，只加载白名单中的股票（可选）
-            use_parquet: 是否使用Parquet格式（None=自动检测，True=强制Parquet，False=使用CSV）
-            num_workers: 并行加载的进程数（1=单进程，>1=多进程，默认为1）
+            db_path: DuckDB数据库文件路径
+            table_name: 数据表名称(默认: 'stock_prices')
+            stock_whitelist: 股票白名单，只查询白名单中的股票（可选）
         """
-        self.data_path = data_path
-        self.min_data_points = min_data_points
+        self.db_path = db_path
+        self.table_name = table_name
         self.stock_whitelist = stock_whitelist
-        self.use_parquet = use_parquet
-        self.num_workers = num_workers if num_workers > 0 else 1
-        self.all_data = None
         self.available_dates = []
         self.stock_codes = []
 
-    def load_data(self, start_date: Optional[str] = None,
-                  end_date: Optional[str] = None) -> None:
-        """
-        加载数据（支持CSV和Parquet格式，支持多进程并行）
+        # 检查数据库文件是否存在
+        if not os.path.exists(db_path):
+            raise FileNotFoundError(f"数据库文件不存在: {db_path}")
 
-        Args:
-            start_date: 开始日期（YYYY-MM-DD）
-            end_date: 结束日期（YYYY-MM-DD）
-        """
-        # 检查数据目录是否存在
-        if not os.path.exists(self.data_path):
-            raise FileNotFoundError(f"数据目录不存在: {self.data_path}")
+        # 连接到数据库
+        self.con = duckdb.connect(db_path)
 
-        # 自动检测文件格式
-        use_parquet = self._detect_format()
+        # 检查表是否存在
+        table_exists = self.con.execute(f"""
+            SELECT table_name FROM information_schema.tables
+            WHERE table_name = '{table_name}'
+        """).fetchone()
 
-        # 确定文件扩展名
-        file_ext = "*.parquet" if use_parquet else "*.csv"
+        if not table_exists:
+            raise ValueError(f"表不存在: {table_name}")
 
-        # 获取所有数据文件
-        all_files = glob.glob(os.path.join(self.data_path, file_ext))
+        # 自动加载元数据
+        self._load_metadata()
 
-        if not all_files:
-            raise ValueError(f"数据目录中没有找到数据文件: {self.data_path}")
-
-        # 如果设置了白名单，过滤文件
-        if self.stock_whitelist is not None:
-            whitelist = [str(code) for code in self.stock_whitelist]
-            filtered_files = []
-            for file_path in all_files:
-                code = os.path.basename(file_path).replace('.parquet', '').replace('.csv', '')
-                if code in whitelist:
-                    filtered_files.append(file_path)
-            all_files = filtered_files
-
-            if not all_files:
-                raise ValueError(f"白名单中的股票在数据目录中未找到。白名单: {whitelist}")
-
-            print(f"启用股票白名单，只加载 {len(all_files)} 只股票...")
-
-        # 显示加载信息
-        format_name = "Parquet" if use_parquet else "CSV"
-        print(f"开始加载数据，共找到 {len(all_files)} 个{format_name}文件...")
-
-        if self.num_workers > 1:
-            print(f"使用 {self.num_workers} 个进程并行加载...")
-            data_frames = self._load_parallel(all_files, use_parquet, start_date, end_date)
+    def _load_metadata(self) -> None:
+        """加载元数据(股票代码列表、可用日期等)"""
+        # 获取所有股票代码
+        if self.stock_whitelist:
+            self.stock_codes = [str(code) for code in self.stock_whitelist]
         else:
-            data_frames = self._load_sequential(all_files, use_parquet, start_date, end_date)
-
-        if not data_frames:
-            raise ValueError("没有加载到任何有效数据")
-
-        # 合并所有数据
-        print("合并数据...")
-        self.all_data = pd.concat(data_frames, ignore_index=True)
-
-        # 确保code列是字符串类型
-        self.all_data['code'] = self.all_data['code'].astype(str)
-
-        # 创建多级索引
-        self.all_data.set_index(['code', 'date'], inplace=True)
-        self.all_data.sort_index(inplace=True)
+            result = self.con.execute(f"""
+                SELECT DISTINCT code FROM {self.table_name} ORDER BY code
+            """).fetchdf()
+            self.stock_codes = result['code'].tolist()
 
         # 获取所有可用交易日期
-        self.available_dates = sorted(
-            self.all_data.index.get_level_values('date').unique().to_list()
-        )
-
+        result = self.con.execute(f"""
+            SELECT DISTINCT date FROM {self.table_name} ORDER BY date
+        """).fetchdf()
+        self.available_dates = result['date'].tolist()
         # 转换为date对象
-        self.available_dates = [d.date() for d in self.available_dates]
-
-        print(f"数据加载完成！")
-        print(f"  - 股票数量: {len(self.stock_codes)}")
-        print(f"  - 日期范围: {self.available_dates[0]} 至 {self.available_dates[-1]}")
-        print(f"  - 总数据点: {len(self.all_data)}")
-
-    def _detect_format(self) -> bool:
-        """自动检测使用哪种文件格式"""
-        if self.use_parquet is not None:
-            # 用户明确指定
-            return self.use_parquet
-
-        # 自动检测：优先使用Parquet
-        parquet_files = glob.glob(os.path.join(self.data_path, "*.parquet"))
-        csv_files = glob.glob(os.path.join(self.data_path, "*.csv"))
-
-        if parquet_files and not csv_files:
-            print("检测到Parquet文件，使用Parquet格式")
-            return True
-        elif csv_files and not parquet_files:
-            print("检测到CSV文件，使用CSV格式")
-            return False
-        elif parquet_files and csv_files:
-            print("同时检测到Parquet和CSV文件，优先使用Parquet格式")
-            return True
-        else:
-            raise ValueError(f"数据目录中没有找到数据文件: {self.data_path}")
-
-    def _load_sequential(self, all_files: List[str], use_parquet: bool,
-                         start_date: Optional[str], end_date: Optional[str]) -> List[pd.DataFrame]:
-        """单进程顺序加载数据"""
-        data_frames = []
-        self.stock_codes = []
-
-        for file_path in tqdm(all_files, desc="加载进度"):
-            df = self._load_single_file(file_path, use_parquet, start_date, end_date)
-            if df is not None and len(df) >= self.min_data_points:
-                data_frames.append(df)
-                code = str(df['code'].iloc[0])
-                if code not in self.stock_codes:
-                    self.stock_codes.append(code)
-
-        return data_frames
-
-    def _load_parallel(self, all_files: List[str], use_parquet: bool,
-                       start_date: Optional[str], end_date: Optional[str]) -> List[pd.DataFrame]:
-        """多进程并行加载数据"""
-        data_frames = []
-        self.stock_codes = []
-
-        # 准备参数
-        load_args = [(file_path, use_parquet, start_date, end_date)
-                     for file_path in all_files]
-
-        with Pool(self.num_workers) as pool:
-            results = list(tqdm(
-                pool.imap(self._load_single_file_wrapper, load_args),
-                total=len(load_args),
-                desc="加载进度"
-            ))
-
-        # 处理结果
-        for df in results:
-            if df is not None and len(df) >= self.min_data_points:
-                data_frames.append(df)
-                code = str(df['code'].iloc[0])
-                if code not in self.stock_codes:
-                    self.stock_codes.append(code)
-
-        return data_frames
-
-    @staticmethod
-    def _load_single_file_wrapper(args):
-        """包装函数用于多进程"""
-        return DataHandler._load_single_file(*args)
-
-    @staticmethod
-    def _load_single_file(file_path: str, use_parquet: bool,
-                          start_date: Optional[str], end_date: Optional[str]) -> Optional[pd.DataFrame]:
-        """加载单个文件"""
-        try:
-            # 读取文件
-            if use_parquet:
-                df = pd.read_parquet(file_path)
-            else:
-                df = pd.read_csv(file_path, encoding='utf-8', dtype={'股票代码': str})
-
-            # 重命名列名为英文字段名
-            if '股票代码' in df.columns:
-                df = df.rename(columns=DataHandler.COLUMN_MAP)
-
-            # 如果文件中没有股票代码，从文件名提取（保留前导0）
-            if 'code' not in df.columns or df['code'].isna().all():
-                code = os.path.basename(file_path).replace('.parquet', '').replace('.csv', '')
-                df['code'] = code
-            else:
-                # 确保code列是字符串类型
-                df['code'] = df['code'].astype(str)
-
-            # 确保日期格式正确
-            df['date'] = pd.to_datetime(df['date'])
-
-            # 过滤日期范围
-            if start_date:
-                df = df[df['date'] >= pd.to_datetime(start_date)]
-            if end_date:
-                df = df[df['date'] <= pd.to_datetime(end_date)]
-
-            return df
-
-        except Exception as e:
-            print(f"\n读取文件失败 {file_path}: {e}")
-            return None
+        self.available_dates = [d.date() if hasattr(d, 'date') else d
+                               for d in self.available_dates]
 
     def get_stock_data(self, code: str,
                        end_date: Optional[date] = None) -> pd.DataFrame:
@@ -259,23 +86,16 @@ class DataHandler:
         Returns:
             股票历史数据DataFrame
         """
-        if self.all_data is None:
-            raise ValueError("数据未加载，请先调用 load_data()")
+        query = f"SELECT * FROM {self.table_name} WHERE code = ?"
+        params = [str(code)]
 
-        try:
-            if code in self.all_data.index:
-                df = self.all_data.loc[code].copy()
+        if end_date:
+            query += " AND date <= ?"
+            params.append(end_date)
 
-                # 如果指定了截止日期，进行过滤
-                if end_date:
-                    df = df[df.index <= pd.Timestamp(end_date)]
+        query += " ORDER BY date"
 
-                return df
-            else:
-                return pd.DataFrame()
-
-        except KeyError:
-            return pd.DataFrame()
+        return self.con.execute(query, params).df()
 
     def get_data_before(self, code: str, date: date) -> pd.DataFrame:
         """
@@ -288,8 +108,11 @@ class DataHandler:
         Returns:
             历史数据DataFrame
         """
-        df = self.get_stock_data(code)
-        return df[df.index <= pd.Timestamp(date)]
+        return self.con.execute(f"""
+            SELECT * FROM {self.table_name}
+            WHERE code = ? AND date <= ?
+            ORDER BY date
+        """, [str(code), date]).df()
 
     def get_daily_data(self, date: date) -> pd.DataFrame:
         """
@@ -301,13 +124,10 @@ class DataHandler:
         Returns:
             当日所有股票数据
         """
-        if self.all_data is None:
-            raise ValueError("数据未加载，请先调用 load_data()")
-
-        try:
-            return self.all_data.xs(pd.Timestamp(date), level='date')
-        except KeyError:
-            return pd.DataFrame()
+        return self.con.execute(f"""
+            SELECT * FROM {self.table_name}
+            WHERE date = ?
+        """, [date]).df()
 
     def get_multi_data(self, codes: List[str],
                        date: date) -> Dict[str, pd.Series]:
@@ -327,6 +147,11 @@ class DataHandler:
         for code in codes:
             if code in daily_data.index:
                 result[code] = daily_data.loc[code]
+            elif not daily_data.empty and 'code' in daily_data.columns:
+                # 如果返回的是未设置索引的DataFrame
+                stock_data = daily_data[daily_data['code'] == code]
+                if not stock_data.empty:
+                    result[code] = stock_data.iloc[0]
 
         return result
 
@@ -334,10 +159,20 @@ class DataHandler:
         """
         获取所有日期的所有股票数据
 
+        注意: 可能会返回大量数据，建议使用get_data_range()进行范围查询
+
         Returns:
             所有股票数据
         """
-        return self.all_data
+        query = f"SELECT * FROM {self.table_name}"
+        if self.stock_whitelist:
+            query += f" WHERE code IN ({','.join(['?' for _ in self.stock_whitelist])})"
+
+        df = self.con.execute(query, self.stock_whitelist if self.stock_whitelist else []).df()
+        df.set_index(['code', 'date'], inplace=True)
+        df.sort_index(inplace=True)
+
+        return df
 
     def get_all_codes(self) -> List[str]:
         """
@@ -387,9 +222,6 @@ class DataHandler:
             >>> # 获取2024-01-10前3个交易日
             >>> prev_3_date = data_handler.get_previous_trading_date(date(2024, 1, 10), n=3)
         """
-        if self.all_data is None:
-            raise ValueError("数据未加载，请先调用 load_data()")
-
         # 获取所有交易日期
         all_dates = self.available_dates
 
@@ -419,25 +251,16 @@ class DataHandler:
         Args:
             new_data: 新的日线数据
         """
-        if self.all_data is None:
-            raise ValueError("基础数据未加载，请先调用 load_data()")
-
-        # 确保列名正确
-        new_data.rename(columns=self.COLUMN_MAP, inplace=True)
-
         # 确保日期格式
         new_data['date'] = pd.to_datetime(new_data['date'])
 
-        # 添加到现有数据
-        new_data.set_index(['code', 'date'], inplace=True)
-        self.all_data = pd.concat([self.all_data, new_data])
-        self.all_data.sort_index(inplace=True)
+        # 插入数据库
+        self.con.register('temp_new_data', new_data)
+        self.con.execute(f"INSERT OR REPLACE INTO {self.table_name} SELECT * FROM temp_new_data")
+        self.con.unregister('temp_new_data')
 
-        # 更新可用日期
-        self.available_dates = sorted(
-            self.all_data.index.get_level_values('date').unique().to_list()
-        )
-        self.available_dates = [d.date() for d in self.available_dates]
+        # 刷新元数据
+        self._load_metadata()
 
     def load_index_data(self, index_path: str, start_date: Optional[str] = None,
                        end_date: Optional[str] = None) -> pd.DataFrame:
@@ -486,24 +309,109 @@ class DataHandler:
         Returns:
             数据集信息字典
         """
-        if self.all_data is None:
-            return {"status": "未加载数据"}
+        # 从数据库查询统计信息
+        result = self.con.execute(f"""
+            SELECT
+                COUNT(DISTINCT code) as stock_count,
+                MIN(date) as min_date,
+                MAX(date) as max_date,
+                COUNT(*) as total_records
+            FROM {self.table_name}
+        """).fetchdf()
+
+        row = result.iloc[0]
 
         return {
-            "status": "已加载",
-            "stock_count": len(self.stock_codes),
-            "start_date": str(self.available_dates[0]),
-            "end_date": str(self.available_dates[-1]),
+            "status": "已连接",
+            "stock_count": int(row['stock_count']),
+            "start_date": str(row['min_date'].date()),
+            "end_date": str(row['max_date'].date()),
             "trading_days": len(self.available_dates),
-            "total_data_points": len(self.all_data)
+            "total_data_points": int(row['total_records'])
         }
 
     def __repr__(self) -> str:
         """字符串表示"""
         info = self.get_data_info()
-        if info["status"] == "未加载数据":
-            return "DataHandler(未加载)"
+        if info["status"] == "未连接":
+            return "DataHandler(未连接)"
 
         return (f"DataHandler(股票: {info['stock_count']}, "
                 f"日期: {info['start_date']} 至 {info['end_date']}, "
                 f"交易日: {info['trading_days']})")
+
+    def close(self) -> None:
+        """关闭数据库连接"""
+        if hasattr(self, 'con') and self.con:
+            self.con.close()
+
+    def get_data_range(self, codes: Optional[List[str]] = None,
+                       start_date: Optional[date] = None,
+                       end_date: Optional[date] = None) -> pd.DataFrame:
+        """
+        获取指定范围的批量数据(高性能方法)
+
+        Args:
+            codes: 股票代码列表(可选,默认全部)
+            start_date: 开始日期(可选)
+            end_date: 结束日期(可选)
+
+        Returns:
+            数据DataFrame
+        """
+        query = f"SELECT * FROM {self.table_name} WHERE 1=1"
+        params = []
+
+        if codes:
+            placeholders = ','.join(['?' for _ in codes])
+            query += f" AND code IN ({placeholders})"
+            params.extend([str(c) for c in codes])
+
+        if start_date:
+            query += " AND date >= ?"
+            params.append(start_date)
+
+        if end_date:
+            query += " AND date <= ?"
+            params.append(end_date)
+
+        query += " ORDER BY code, date"
+
+        return self.con.execute(query, params).df()
+
+    def execute_sql(self, sql: str, params: Optional[List] = None) -> pd.DataFrame:
+        """
+        执行自定义SQL查询
+
+        Args:
+            sql: SQL查询语句
+            params: 查询参数(可选)
+
+        Returns:
+            查询结果DataFrame
+
+        Example:
+            >>> # 查询2024年涨幅最大的10只股票
+            >>> sql = '''
+            ... SELECT code,
+            ...        (LAST(close) - FIRST(close)) / FIRST(close) as return_rate
+            ... FROM stock_prices
+            ... WHERE date >= '2024-01-01' AND date <= '2024-12-31'
+            ... GROUP BY code
+            ... ORDER BY return_rate DESC
+            ... LIMIT 10
+            ... '''
+            >>> result = handler.execute_sql(sql)
+        """
+        if params:
+            return self.con.execute(sql, params).df()
+        else:
+            return self.con.execute(sql).df()
+
+    def __enter__(self):
+        """上下文管理器入口"""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """上下文管理器出口"""
+        self.close()
