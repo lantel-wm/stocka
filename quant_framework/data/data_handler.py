@@ -19,19 +19,22 @@ class DataHandler:
 
     注意: 初始化后即可直接使用，无需调用load_data()
     """
-    def __init__(self, db_path: str, table_name: str = 'stock_prices',
-                 stock_whitelist: Optional[List[str]] = None):
+
+    # 表名常量
+    TABLE_PRICES = 'stock_prices'
+    TABLE_STOCK_INFO = 'stock_info'
+    TABLE_TRADING_DAYS = 'trading_days'
+    TABLE_FACTOR_DEFINITIONS = 'factor_definitions'
+    TABLE_FACTOR_DATA = 'factor_data'
+
+    def __init__(self, db_path: str):
         """
         初始化数据处理器
 
         Args:
             db_path: DuckDB数据库文件路径
-            table_name: 数据表名称(默认: 'stock_prices')
-            stock_whitelist: 股票白名单，只查询白名单中的股票（可选）
         """
         self.db_path = db_path
-        self.table_name = table_name
-        self.stock_whitelist = stock_whitelist
         self.available_dates = []
         self.stock_codes = []
 
@@ -42,14 +45,14 @@ class DataHandler:
         # 连接到数据库
         self.con = duckdb.connect(db_path)
 
-        # 检查表是否存在
+        # 检查价格表是否存在
         table_exists = self.con.execute(f"""
             SELECT table_name FROM information_schema.tables
-            WHERE table_name = '{table_name}'
+            WHERE table_name = '{self.TABLE_PRICES}'
         """).fetchone()
 
         if not table_exists:
-            raise ValueError(f"表不存在: {table_name}")
+            raise ValueError(f"表不存在: {self.TABLE_PRICES}")
 
         # 自动加载元数据
         self._load_metadata()
@@ -57,17 +60,14 @@ class DataHandler:
     def _load_metadata(self) -> None:
         """加载元数据(股票代码列表、可用日期等)"""
         # 获取所有股票代码
-        if self.stock_whitelist:
-            self.stock_codes = [str(code) for code in self.stock_whitelist]
-        else:
-            result = self.con.execute(f"""
-                SELECT DISTINCT code FROM {self.table_name} ORDER BY code
-            """).fetchdf()
-            self.stock_codes = result['code'].tolist()
+        result = self.con.execute(f"""
+            SELECT DISTINCT code FROM {self.TABLE_PRICES} ORDER BY code
+        """).fetchdf()
+        self.stock_codes = result['code'].tolist()
 
         # 获取所有可用交易日期
         result = self.con.execute(f"""
-            SELECT DISTINCT date FROM {self.table_name} ORDER BY date
+            SELECT DISTINCT date FROM {self.TABLE_PRICES} ORDER BY date
         """).fetchdf()
         self.available_dates = result['date'].tolist()
         # 转换为date对象
@@ -86,7 +86,7 @@ class DataHandler:
         Returns:
             股票历史数据DataFrame
         """
-        query = f"SELECT * FROM {self.table_name} WHERE code = ?"
+        query = f"SELECT * FROM {self.TABLE_PRICES} WHERE code = ?"
         params = [str(code)]
 
         if end_date:
@@ -109,7 +109,7 @@ class DataHandler:
             历史数据DataFrame
         """
         return self.con.execute(f"""
-            SELECT * FROM {self.table_name}
+            SELECT * FROM {self.TABLE_PRICES}
             WHERE code = ? AND date <= ?
             ORDER BY date
         """, [str(code), date]).df()
@@ -125,7 +125,7 @@ class DataHandler:
             当日所有股票数据
         """
         return self.con.execute(f"""
-            SELECT * FROM {self.table_name}
+            SELECT * FROM {self.TABLE_PRICES}
             WHERE date = ?
         """, [date]).df()
 
@@ -164,11 +164,8 @@ class DataHandler:
         Returns:
             所有股票数据
         """
-        query = f"SELECT * FROM {self.table_name}"
-        if self.stock_whitelist:
-            query += f" WHERE code IN ({','.join(['?' for _ in self.stock_whitelist])})"
-
-        df = self.con.execute(query, self.stock_whitelist if self.stock_whitelist else []).df()
+        query = f"SELECT * FROM {self.TABLE_PRICES}"
+        df = self.con.execute(query).df()
         df.set_index(['code', 'date'], inplace=True)
         df.sort_index(inplace=True)
 
@@ -256,7 +253,7 @@ class DataHandler:
 
         # 插入数据库
         self.con.register('temp_new_data', new_data)
-        self.con.execute(f"INSERT OR REPLACE INTO {self.table_name} SELECT * FROM temp_new_data")
+        self.con.execute(f"INSERT OR REPLACE INTO {self.TABLE_PRICES} SELECT * FROM temp_new_data")
         self.con.unregister('temp_new_data')
 
         # 刷新元数据
@@ -316,7 +313,7 @@ class DataHandler:
                 MIN(date) as min_date,
                 MAX(date) as max_date,
                 COUNT(*) as total_records
-            FROM {self.table_name}
+            FROM {self.TABLE_PRICES}
         """).fetchdf()
 
         row = result.iloc[0]
@@ -359,7 +356,7 @@ class DataHandler:
         Returns:
             数据DataFrame
         """
-        query = f"SELECT * FROM {self.table_name} WHERE 1=1"
+        query = f"SELECT * FROM {self.TABLE_PRICES} WHERE 1=1"
         params = []
 
         if codes:
@@ -415,3 +412,439 @@ class DataHandler:
     def __exit__(self, exc_type, exc_val, exc_tb):
         """上下文管理器出口"""
         self.close()
+
+    # ==================== 因子相关方法 ====================
+
+    def get_stock_info(self, stock_code: Optional[str] = None) -> pd.DataFrame:
+        """
+        获取股票基本信息
+
+        Args:
+            stock_code: 股票代码，None表示获取所有股票信息
+
+        Returns:
+            股票信息DataFrame
+        """
+        # 检查表是否存在
+        table_exists = self.con.execute(f"""
+            SELECT table_name FROM information_schema.tables
+            WHERE table_name = '{self.TABLE_STOCK_INFO}'
+        """).fetchone()
+
+        if not table_exists:
+            return pd.DataFrame()
+
+        if stock_code:
+            return self.con.execute(f"""
+                SELECT * FROM {self.TABLE_STOCK_INFO}
+                WHERE code = ?
+            """, [str(stock_code)]).df()
+        else:
+            return self.con.execute(f"""
+                SELECT * FROM {self.TABLE_STOCK_INFO}
+            """).df()
+
+    def get_trading_days(self, start_date: Optional[date] = None,
+                        end_date: Optional[date] = None) -> List[date]:
+        """
+        获取交易日历
+
+        Args:
+            start_date: 开始日期
+            end_date: 结束日期
+
+        Returns:
+            交易日期列表
+        """
+        # 检查表是否存在
+        table_exists = self.con.execute(f"""
+            SELECT table_name FROM information_schema.tables
+            WHERE table_name = '{self.TABLE_TRADING_DAYS}'
+        """).fetchone()
+
+        if not table_exists:
+            # 如果交易日历表不存在，从价格表中获取
+            return self.get_available_dates(start_date, end_date)
+
+        query = f"SELECT date FROM {self.TABLE_TRADING_DAYS} WHERE 1=1"
+        params = []
+
+        if start_date:
+            query += " AND date >= ?"
+            params.append(start_date)
+
+        if end_date:
+            query += " AND date <= ?"
+            params.append(end_date)
+
+        query += " ORDER BY date"
+
+        result = self.con.execute(query, params).fetchdf()
+        return result['date'].tolist()
+
+    def is_trading_day(self, date: date) -> bool:
+        """
+        检查指定日期是否为交易日
+
+        Args:
+            date: 日期
+
+        Returns:
+            是否为交易日
+        """
+        trading_days = self.get_trading_days(date, date)
+        return date in trading_days
+
+    def _init_factor_tables(self) -> None:
+        """初始化因子表（如果不存在）"""
+        # 创建序列用于生成因子 ID
+        try:
+            self.con.execute("CREATE SEQUENCE factor_id_seq START 1")
+        except Exception:
+            # 序列可能已存在，忽略错误
+            pass
+
+        # 创建因子定义表
+        self.con.execute("""
+            CREATE TABLE IF NOT EXISTS factor_definitions (
+                factor_id INTEGER PRIMARY KEY,
+                factor_name VARCHAR(50) UNIQUE NOT NULL,
+                factor_category VARCHAR(20),
+                factor_desc TEXT,
+                created_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # 创建因子值表
+        self.con.execute("""
+            CREATE TABLE IF NOT EXISTS factor_data (
+                trade_date DATE NOT NULL,
+                stock_code VARCHAR(10) NOT NULL,
+                factor_id INTEGER NOT NULL,
+                factor_value DOUBLE,
+                PRIMARY KEY (trade_date, stock_code, factor_id),
+                FOREIGN KEY (factor_id) REFERENCES factor_definitions(factor_id)
+            )
+        """)
+
+        # 创建索引
+        self.con.execute("CREATE INDEX IF NOT EXISTS idx_factor_date_id ON factor_data(trade_date, factor_id)")
+        self.con.execute("CREATE INDEX IF NOT EXISTS idx_factor_code_date ON factor_data(stock_code, trade_date)")
+        self.con.execute("CREATE INDEX IF NOT EXISTS idx_factor_code_id_date ON factor_data(stock_code, factor_id, trade_date)")
+
+    def register_factor(self, factor_name: str, factor_category: str = 'custom',
+                       factor_desc: str = None) -> int:
+        """
+        注册因子定义
+
+        Args:
+            factor_name: 因子名称
+            factor_category: 因子类别 (alpha158, custom, etc.)
+            factor_desc: 因子描述
+
+        Returns:
+            因子ID
+        """
+        # 检查因子是否已存在
+        result = self.con.execute(
+            f"SELECT factor_id FROM {self.TABLE_FACTOR_DEFINITIONS} WHERE factor_name = ?",
+            [factor_name]
+        ).fetchone()
+
+        if result:
+            return result[0]
+
+        # 插入新因子（显式使用序列生成 ID）
+        self.con.execute(f"""
+            INSERT INTO {self.TABLE_FACTOR_DEFINITIONS} (factor_id, factor_name, factor_category, factor_desc)
+            VALUES (nextval('factor_id_seq'), ?, ?, ?)
+        """, [factor_name, factor_category, factor_desc])
+
+        # 返回新插入的ID
+        result = self.con.execute(
+            f"SELECT factor_id FROM {self.TABLE_FACTOR_DEFINITIONS} WHERE factor_name = ?",
+            [factor_name]
+        ).fetchone()
+        return result[0] if result else None
+
+    def get_factor_id(self, factor_name: str) -> Optional[int]:
+        """
+        获取因子ID
+
+        Args:
+            factor_name: 因子名称
+
+        Returns:
+            因子ID，如果不存在返回None
+        """
+        result = self.con.execute(
+            f"SELECT factor_id FROM {self.TABLE_FACTOR_DEFINITIONS} WHERE factor_name = ?",
+            [factor_name]
+        ).fetchone()
+        return result[0] if result else None
+
+    def get_available_factors(self) -> List[str]:
+        """
+        获取所有可用的因子名称
+
+        Returns:
+            因子名称列表
+        """
+        result = self.con.execute(f"""
+            SELECT factor_name FROM {self.TABLE_FACTOR_DEFINITIONS}
+            ORDER BY factor_category, factor_name
+        """).fetchdf()
+        return result['factor_name'].tolist()
+
+    def save_factors(self, factor_df: pd.DataFrame, trade_date: date) -> None:
+        """
+        批量保存因子值到数据库
+
+        Args:
+            factor_df: 因子DataFrame，索引为stock_code，列为因子名称
+            trade_date: 交易日期
+
+        Example:
+            >>> factors = pd.DataFrame({
+            ...     'MA5': [1.02, 0.98, 1.01],
+            ...     'MA10': [0.99, 1.02, 0.97]
+            ... }, index=['000001', '000002', '600000'])
+            >>> handler.save_factors(factors, date(2024, 1, 10))
+        """
+        # 确保因子表已初始化
+        self._init_factor_tables()
+
+        # 批量获取所有因子的ID（一次性查询，避免循环查询）
+        factor_names = list(factor_df.columns)
+        factor_ids = {}
+
+        # 批量查询所有因子的ID
+        placeholders = ','.join(['?' for _ in factor_names])
+        query = f"SELECT factor_name, factor_id FROM {self.TABLE_FACTOR_DEFINITIONS} WHERE factor_name IN ({placeholders})"
+        result = self.con.execute(query, factor_names).fetchdf()
+
+        # 构建因子名到ID的映射
+        for _, row in result.iterrows():
+            factor_ids[row['factor_name']] = row['factor_id']
+
+        # 准备数据：转换为长格式
+        records = []
+        for stock_code in factor_df.index:
+            for factor_name in factor_df.columns:
+                factor_value = factor_df.loc[stock_code, factor_name]
+                if pd.notna(factor_value):  # 跳过NaN值
+                    # 从缓存中获取因子ID
+                    if factor_name not in factor_ids:
+                        # 如果因子不存在，注册它
+                        factor_ids[factor_name] = self.register_factor(factor_name, 'custom')
+
+                    factor_id = factor_ids[factor_name]
+
+                    records.append({
+                        'trade_date': trade_date,
+                        'stock_code': str(stock_code),
+                        'factor_id': factor_id,
+                        'factor_value': float(factor_value)
+                    })
+
+        if not records:
+            return
+
+        # 批量插入
+        insert_df = pd.DataFrame(records)
+        self.con.register('temp_factor_data', insert_df)
+        self.con.execute(f"""
+            INSERT OR REPLACE INTO {self.TABLE_FACTOR_DATA}
+            SELECT trade_date, stock_code, factor_id, factor_value
+            FROM temp_factor_data
+        """)
+        self.con.unregister('temp_factor_data')
+
+    def get_factor_cross_section(self, trade_date: date,
+                                factor_names: Optional[List[str]] = None) -> pd.DataFrame:
+        """
+        获取截面因子数据（某日所有股票的指定因子）
+
+        Args:
+            trade_date: 交易日期
+            factor_names: 因子名称列表，None表示所有因子
+
+        Returns:
+            DataFrame，索引为stock_code，列为factor_names
+        """
+        # 构建查询
+        if factor_names:
+            factor_ids = []
+            for name in factor_names:
+                factor_id = self.get_factor_id(name)
+                if factor_id:
+                    factor_ids.append(factor_id)
+
+            if not factor_ids:
+                return pd.DataFrame()
+
+            placeholders = ','.join(['?' for _ in factor_ids])
+            query = f"""
+                SELECT fd.stock_code, fd.factor_value, fdef.factor_name
+                FROM {self.TABLE_FACTOR_DATA} fd
+                JOIN {self.TABLE_FACTOR_DEFINITIONS} fdef ON fd.factor_id = fdef.factor_id
+                WHERE fd.trade_date = ? AND fd.factor_id IN ({placeholders})
+            """
+            params = [trade_date] + factor_ids
+        else:
+            query = """
+                SELECT fd.stock_code, fd.factor_value, fdef.factor_name
+                FROM {self.TABLE_FACTOR_DATA} fd
+                JOIN {self.TABLE_FACTOR_DEFINITIONS} fdef ON fd.factor_id = fdef.factor_id
+                WHERE fd.trade_date = ?
+            """
+            params = [trade_date]
+
+        result = self.con.execute(query, params).fetchdf()
+
+        if result.empty:
+            return pd.DataFrame()
+
+        # 转换为宽表格式
+        pivot_df = result.pivot(index='stock_code', columns='factor_name', values='factor_value')
+
+        if factor_names:
+            # 确保列顺序
+            pivot_df = pivot_df.reindex(columns=factor_names)
+
+        return pivot_df
+
+    def get_stock_factors(self, stock_code: str,
+                         factor_names: Optional[List[str]] = None,
+                         start_date: Optional[date] = None,
+                         end_date: Optional[date] = None) -> pd.DataFrame:
+        """
+        获取单只股票的时序因子数据
+
+        Args:
+            stock_code: 股票代码
+            factor_names: 因子名称列表，None表示所有因子
+            start_date: 开始日期
+            end_date: 结束日期
+
+        Returns:
+            DataFrame，索引为trade_date，列为factor_names
+        """
+        # 构建查询
+        query = """
+            SELECT fd.trade_date, fd.factor_value, fdef.factor_name
+            FROM factor_data fd
+            JOIN factor_definitions fdef ON fd.factor_id = fdef.factor_id
+            WHERE fd.stock_code = ?
+        """
+        params = [str(stock_code)]
+
+        if start_date:
+            query += " AND fd.trade_date >= ?"
+            params.append(start_date)
+
+        if end_date:
+            query += " AND fd.trade_date <= ?"
+            params.append(end_date)
+
+        if factor_names:
+            factor_ids = []
+            for name in factor_names:
+                factor_id = self.get_factor_id(name)
+                if factor_id:
+                    factor_ids.append(factor_id)
+
+            if factor_ids:
+                placeholders = ','.join(['?' for _ in factor_ids])
+                query += f" AND fd.factor_id IN ({placeholders})"
+                params.extend(factor_ids)
+            else:
+                return pd.DataFrame()
+
+        query += " ORDER BY fd.trade_date"
+
+        result = self.con.execute(query, params).fetchdf()
+
+        if result.empty:
+            return pd.DataFrame()
+
+        # 转换为宽表格式
+        pivot_df = result.pivot(index='trade_date', columns='factor_name', values='factor_value')
+
+        if factor_names:
+            # 确保列顺序
+            pivot_df = pivot_df.reindex(columns=factor_names)
+
+        return pivot_df
+
+    def get_factors_wide(self, trade_date: date,
+                        stock_codes: Optional[List[str]] = None,
+                        factor_names: Optional[List[str]] = None) -> pd.DataFrame:
+        """
+        获取宽表格式的因子数据（用于ML预测）
+
+        Args:
+            trade_date: 交易日期
+            stock_codes: 股票代码列表，None表示所有股票
+            factor_names: 因子名称列表，None表示所有因子
+
+        Returns:
+            DataFrame，索引为stock_code，列为factor_names
+        """
+        # 如果没有指定因子，获取所有因子
+        if factor_names is None:
+            factor_names = self.get_available_factors()
+
+        if not factor_names:
+            return pd.DataFrame()
+
+        # 构建PIVOT查询
+        pivot_columns = ', '.join([
+            f"MAX(CASE WHEN fdef.factor_name = '{name}' THEN fd.factor_value END) AS {name}"
+            for name in factor_names
+        ])
+
+        query = f"""
+            SELECT
+                fd.stock_code,
+                {pivot_columns}
+            FROM {self.TABLE_FACTOR_DATA} fd
+            JOIN {self.TABLE_FACTOR_DEFINITIONS} fdef ON fd.factor_id = fdef.factor_id
+            WHERE fd.trade_date = ?
+        """
+
+        params = [trade_date]
+
+        if stock_codes:
+            placeholders = ','.join(['?' for _ in stock_codes])
+            query += f" AND fd.stock_code IN ({placeholders})"
+            params.extend([str(code) for code in stock_codes])
+
+        query += " GROUP BY fd.stock_code"
+
+        result = self.con.execute(query, params).fetchdf()
+
+        if result.empty:
+            return pd.DataFrame()
+
+        result.set_index('stock_code', inplace=True)
+
+        # 确保列顺序
+        result = result.reindex(columns=factor_names)
+
+        return result
+
+    def get_factor_info(self) -> pd.DataFrame:
+        """
+        获取因子定义信息
+
+        Returns:
+            因子定义DataFrame
+        """
+        result = self.con.execute(f"""
+            SELECT factor_id, factor_name, factor_category, factor_desc, created_time
+            FROM {self.TABLE_FACTOR_DEFINITIONS}
+            ORDER BY factor_category, factor_name
+        """).fetchdf()
+
+        return result
