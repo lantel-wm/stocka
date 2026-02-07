@@ -46,16 +46,28 @@ def example_register_factors():
     handler = DataHandler('data/stock.db')
     handler._init_factor_tables()
 
-    # 注册 Alpha158 因子
-    factor_names = ['MA5', 'MA10', 'MA20', 'RSV5', 'RSV10']
+    # 注册 Alpha158 因子（使用预定义的因子ID）
+    # 这里使用与 Alpha158.DEFINITIONS 中相同的ID
+    alpha158_factors = [
+        (18, 'MA5', '5日均线'),
+        (19, 'MA10', '10日均线'),
+        (20, 'MA20', '20日均线'),
+        (63, 'RSV5', '5日RSV'),
+        (64, 'RSV10', '10日RSV'),
+    ]
 
-    for factor_name in factor_names:
-        factor_id = handler.register_factor(
-            factor_name,
-            'alpha158',
-            f'{factor_name} 因子'
-        )
-        print(f"  注册因子: {factor_name} (ID: {factor_id})")
+    for factor_id, factor_name, desc in alpha158_factors:
+        try:
+            result_id = handler.register_factor(
+                factor_id,
+                factor_name,
+                'alpha158',
+                desc,
+                on_conflict='skip'  # 跳过已存在的因子
+            )
+            print(f"  注册因子: {factor_name} (ID: {result_id})")
+        except Exception as e:
+            print(f"  ✗ 注册因子 {factor_name} 失败: {e}")
 
     # 查看所有注册的因子
     all_factors = handler.get_available_factors()
@@ -73,9 +85,9 @@ def example_save_factors():
     handler = DataHandler('data/stock.db')
     handler._init_factor_tables()
 
-    # 注册因子
-    handler.register_factor('MA5', 'alpha158', '5日均线')
-    handler.register_factor('MA10', 'alpha158', '10日均线')
+    # 注册因子（指定ID）
+    handler.register_factor(18, 'MA5', 'alpha158', '5日均线', on_conflict='skip')
+    handler.register_factor(19, 'MA10', 'alpha158', '10日均线', on_conflict='skip')
 
     # 创建测试数据（3只股票，2个因子）
     factor_df = pd.DataFrame({
@@ -200,12 +212,18 @@ def example_ml_workflow():
 
     handler = DataHandler('data/stock.db')
 
-    # ML模型使用的因子列表
-    ml_factors = ['MA5', 'MA10', 'MA20', 'RSV5', 'RSV10']
+    # ML模型使用的因子列表（使用预定义的因子ID）
+    ml_factors = [
+        (18, 'MA5'),
+        (19, 'MA10'),
+        (20, 'MA20'),
+        (63, 'RSV5'),
+        (64, 'RSV10'),
+    ]
 
-    # 注册因子
-    for factor in ml_factors:
-        handler.register_factor(factor, 'alpha158', f'{factor} 因子')
+    # 注册因子（指定ID）
+    for factor_id, factor_name in ml_factors:
+        handler.register_factor(factor_id, factor_name, 'alpha158', f'{factor_name} 因子', on_conflict='skip')
 
     # 模拟保存计算好的因子
     factor_df = pd.DataFrame({

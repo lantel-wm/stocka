@@ -10,7 +10,7 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from quant_framework import (
-    DataHandler,
+    DataHandlerF,
     MLStrategy,
     BacktestEngine,
     StandardCost,
@@ -31,7 +31,7 @@ def main():
 
     # ==================== 第1步：初始化数据处理器 ====================
     logger.info("第1步：加载数据...")
-    data_handler = DataHandler(
+    data_handler = DataHandlerF(
         data_path="../data/factor/day/alpha158",
         min_data_points=50,
         # stock_whitelist=['000001']  # 只加载平安银行的数据
@@ -45,7 +45,7 @@ def main():
         data_load_end = "2025-12-31"    # 数据结束日期
 
         # 回测范围
-        backtest_start = "2024-01-02"
+        backtest_start = "2024-01-08"
         backtest_end = "2025-12-31"
         # backtest_end = "2024-02-01"
 
@@ -91,11 +91,15 @@ def main():
     strategy = MLStrategy({
         # 'model_path': '../examples/lightgbm_model.pkl',
         # 'model_path': '../examples/examples/pipeline_outputs/pipeline_20260131_154340/model.pkl',
-        'model_path': '/home/zzy/projects/stocka/examples/examples/pipeline_outputs/pipeline_20260203_200936/model.pkl',
-
-        'rebalance_days': 3,
-        'top_k': 10,
+        'model_path': '../ckpt/lightgbm_model_2005_2021.pkl',
+        'weight_method': 'equal',
+        # 'weight_method': 'score',
+        'min_score': 0.6,
+        'rebalance_days': 5,
+        'top_k': 3,
         'stop_loss': 0.01,
+        'trailing_stop_percent': 0.02,
+        'trailing_stop_activation': 0.03,
     })
     logger.info(f"策略名称: {strategy.name}")
     logger.info(f"策略参数: {strategy.params}")
@@ -172,13 +176,26 @@ def main():
             trade_analysis=results.get('trade_analysis', {})
         )
 
+        # 导出预测历史到CSV
+        logger.info("导出预测历史...")
+        prediction_csv = report_gen.export_prediction_history_to_csv(
+            strategy=strategy
+        )
+
+        # 导出策略参数到JSON
+        logger.info("导出策略参数...")
+        params_json = report_gen.export_strategy_params_to_json(
+            strategy=strategy
+        )
+
         # 绘制资金曲线
         logger.info("绘制资金曲线...")
         report_gen.plot_equity_curve(
             portfolio_history=results['portfolio_history'],
             benchmark_history=results.get('benchmark_history'),  # 传递benchmark数据
             save=True,
-            show=False
+            show=False,
+            log_scale=True,
         )
 
         # 绘制收益率分布

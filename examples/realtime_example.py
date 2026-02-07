@@ -54,6 +54,16 @@ strategy = MLStrategy(params={
     # 'stop_loss_check_daily': True,
 })
 
+strategy = MLStrategy({
+    'model_path': os.path.join(STOCKA_BASE_DIR, './ckpt/lightgbm_model_2005_2021.pkl'),
+    'weight_method': 'equal',
+    # 'weight_method': 'score',
+    'min_score': 0.1,
+    'rebalance_days': 3,
+    'top_k': 3,
+    'stop_loss': 0.01,
+})
+
 # 2. 创建实盘交易调度器
 trader = LiveTrader(
     strategy=strategy,
