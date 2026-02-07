@@ -42,7 +42,6 @@ class DataHandler:
         if not os.path.exists(db_path):
             raise FileNotFoundError(f"数据库文件不存在: {db_path}")
 
-        # 连接到数据库
         self.con = duckdb.connect(db_path)
 
         # 检查价格表是否存在
@@ -56,6 +55,8 @@ class DataHandler:
 
         # 自动加载元数据
         self._load_metadata()
+        
+        self._init_factor_tables()
 
     def _load_metadata(self) -> None:
         """加载元数据(股票代码列表、可用日期等)"""
@@ -75,12 +76,14 @@ class DataHandler:
                                for d in self.available_dates]
 
     def get_stock_data(self, code: str,
+                       start_date: Optional[date] = None,
                        end_date: Optional[date] = None) -> pd.DataFrame:
         """
         获取单只股票的历史数据
 
         Args:
             code: 股票代码
+            start_date: 开始日期（默认返回所有数据）
             end_date: 截止日期（默认返回所有数据）
 
         Returns:
@@ -88,6 +91,10 @@ class DataHandler:
         """
         query = f"SELECT * FROM {self.TABLE_PRICES} WHERE code = ?"
         params = [str(code)]
+        
+        if start_date:
+            query += " AND date >= ?"
+            params.append(start_date)
 
         if end_date:
             query += " AND date <= ?"
@@ -128,32 +135,40 @@ class DataHandler:
             SELECT * FROM {self.TABLE_PRICES}
             WHERE date = ?
         """, [date]).df()
-
-    def get_multi_data(self, codes: List[str],
-                       date: date) -> Dict[str, pd.Series]:
+        
+    def get_range_data(self, codes: Optional[List[str]] = None,
+                       start_date: Optional[date] = None,
+                       end_date: Optional[date] = None) -> pd.DataFrame:
         """
-        获取多只股票在指定日期的数据
+        获取指定范围的批量数据(高性能方法)
 
         Args:
-            codes: 股票代码列表
-            date: 交易日期
+            codes: 股票代码列表(可选,默认全部)
+            start_date: 开始日期(可选)
+            end_date: 结束日期(可选)
 
         Returns:
-            {股票代码: 当日数据Series} 的字典
+            数据DataFrame
         """
-        result = {}
-        daily_data = self.get_daily_data(date)
+        query = f"SELECT * FROM {self.TABLE_PRICES} WHERE 1=1"
+        params = []
 
-        for code in codes:
-            if code in daily_data.index:
-                result[code] = daily_data.loc[code]
-            elif not daily_data.empty and 'code' in daily_data.columns:
-                # 如果返回的是未设置索引的DataFrame
-                stock_data = daily_data[daily_data['code'] == code]
-                if not stock_data.empty:
-                    result[code] = stock_data.iloc[0]
+        if codes:
+            placeholders = ','.join(['?' for _ in codes])
+            query += f" AND code IN ({placeholders})"
+            params.extend([str(c) for c in codes])
 
-        return result
+        if start_date:
+            query += " AND date >= ?"
+            params.append(start_date)
+
+        if end_date:
+            query += " AND date <= ?"
+            params.append(end_date)
+
+        query += " ORDER BY code, date"
+
+        return self.con.execute(query, params).df()
 
     def get_all_data(self) -> pd.DataFrame:
         """
@@ -342,40 +357,6 @@ class DataHandler:
         if hasattr(self, 'con') and self.con:
             self.con.close()
 
-    def get_data_range(self, codes: Optional[List[str]] = None,
-                       start_date: Optional[date] = None,
-                       end_date: Optional[date] = None) -> pd.DataFrame:
-        """
-        获取指定范围的批量数据(高性能方法)
-
-        Args:
-            codes: 股票代码列表(可选,默认全部)
-            start_date: 开始日期(可选)
-            end_date: 结束日期(可选)
-
-        Returns:
-            数据DataFrame
-        """
-        query = f"SELECT * FROM {self.TABLE_PRICES} WHERE 1=1"
-        params = []
-
-        if codes:
-            placeholders = ','.join(['?' for _ in codes])
-            query += f" AND code IN ({placeholders})"
-            params.extend([str(c) for c in codes])
-
-        if start_date:
-            query += " AND date >= ?"
-            params.append(start_date)
-
-        if end_date:
-            query += " AND date <= ?"
-            params.append(end_date)
-
-        query += " ORDER BY code, date"
-
-        return self.con.execute(query, params).df()
-
     def execute_sql(self, sql: str, params: Optional[List] = None) -> pd.DataFrame:
         """
         执行自定义SQL查询
@@ -532,10 +513,92 @@ class DataHandler:
         self.con.execute("CREATE INDEX IF NOT EXISTS idx_factor_code_date ON factor_data(stock_code, trade_date)")
         self.con.execute("CREATE INDEX IF NOT EXISTS idx_factor_code_id_date ON factor_data(stock_code, factor_id, trade_date)")
 
-    def register_factor(self, factor_name: str, factor_category: str = 'custom',
-                       factor_desc: str = None) -> int:
+    def register_factor(self, factor_id: int, factor_name: str,
+                       factor_category: str = 'custom', factor_desc: str = None,
+                       on_conflict: str = 'error') -> int:
         """
         注册因子定义
+
+        Args:
+            factor_id: 因子ID（必需）
+            factor_name: 因子名称
+            factor_category: 因子类别 (alpha158, custom, etc.)
+            factor_desc: 因子描述
+            on_conflict: 冲突处理策略
+                - 'error': 抛出异常（默认）
+                - 'skip': 跳过，返回已存在的ID
+                - 'replace': 更新现有定义
+
+        Returns:
+            因子ID
+
+        Raises:
+            ValueError: 当 on_conflict='error' 且因子ID或名称已存在时
+        """
+        # 检查因子ID是否已存在
+        existing_by_id = self.con.execute(
+            f"SELECT factor_name FROM {self.TABLE_FACTOR_DEFINITIONS} WHERE factor_id = ?",
+            [factor_id]
+        ).fetchone()
+
+        # 检查因子名称是否已存在
+        existing_by_name = self.con.execute(
+            f"SELECT factor_id FROM {self.TABLE_FACTOR_DEFINITIONS} WHERE factor_name = ?",
+            [factor_name]
+        ).fetchone()
+
+        # 处理冲突
+        if existing_by_id or existing_by_name:
+            if on_conflict == 'error':
+                if existing_by_id and existing_by_name:
+                    if existing_by_id[0] == factor_name:
+                        # 同一个因子，直接返回ID
+                        return factor_id
+                    else:
+                        raise ValueError(
+                            f"因子ID {factor_id} 已被因子 '{existing_by_id[0]}' 使用，"
+                            f"且因子名 '{factor_name}' 已分配ID {existing_by_name[0]}"
+                        )
+                elif existing_by_id:
+                    raise ValueError(
+                        f"因子ID {factor_id} 已被因子 '{existing_by_id[0]}' 使用"
+                    )
+                else:
+                    raise ValueError(
+                        f"因子名 '{factor_name}' 已存在，ID为 {existing_by_name[0]}"
+                    )
+            elif on_conflict == 'skip':
+                # 返回已存在的ID
+                if existing_by_id:
+                    return factor_id
+                else:
+                    return existing_by_name[0]
+            elif on_conflict == 'replace':
+                # 删除旧记录
+                if existing_by_id:
+                    self.con.execute(
+                        f"DELETE FROM {self.TABLE_FACTOR_DEFINITIONS} WHERE factor_id = ?",
+                        [factor_id]
+                    )
+                if existing_by_name and existing_by_name[0] != factor_id:
+                    self.con.execute(
+                        f"DELETE FROM {self.TABLE_FACTOR_DEFINITIONS} WHERE factor_name = ?",
+                        [factor_name]
+                    )
+
+        # 插入新因子
+        self.con.execute(f"""
+            INSERT INTO {self.TABLE_FACTOR_DEFINITIONS} (factor_id, factor_name, factor_category, factor_desc)
+            VALUES (?, ?, ?, ?)
+        """, [factor_id, factor_name, factor_category, factor_desc])
+
+        return factor_id
+
+    def register_factor_auto(self, factor_name: str,
+                            factor_category: str = 'custom',
+                            factor_desc: str = None) -> int:
+        """
+        注册因子定义（自动生成ID，用于向后兼容和自动注册）
 
         Args:
             factor_name: 因子名称
@@ -554,7 +617,7 @@ class DataHandler:
         if result:
             return result[0]
 
-        # 插入新因子（显式使用序列生成 ID）
+        # 插入新因子（使用序列生成 ID）
         self.con.execute(f"""
             INSERT INTO {self.TABLE_FACTOR_DEFINITIONS} (factor_id, factor_name, factor_category, factor_desc)
             VALUES (nextval('factor_id_seq'), ?, ?, ?)
@@ -611,9 +674,6 @@ class DataHandler:
             ... }, index=['000001', '000002', '600000'])
             >>> handler.save_factors(factors, date(2024, 1, 10))
         """
-        # 确保因子表已初始化
-        self._init_factor_tables()
-
         # 批量获取所有因子的ID（一次性查询，避免循环查询）
         factor_names = list(factor_df.columns)
         factor_ids = {}
@@ -635,8 +695,8 @@ class DataHandler:
                 if pd.notna(factor_value):  # 跳过NaN值
                     # 从缓存中获取因子ID
                     if factor_name not in factor_ids:
-                        # 如果因子不存在，注册它
-                        factor_ids[factor_name] = self.register_factor(factor_name, 'custom')
+                        # 如果因子不存在，自动注册它（使用序列生成ID）
+                        factor_ids[factor_name] = self.register_factor_auto(factor_name, 'custom')
 
                     factor_id = factor_ids[factor_name]
 
