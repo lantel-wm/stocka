@@ -85,7 +85,8 @@ class ReportGenerator:
                          portfolio_history: List[Dict],
                          benchmark_history: Optional[pd.DataFrame] = None,
                          save: bool = True,
-                         show: bool = False) -> Optional[str]:
+                         show: bool = False,
+                         log_scale: bool = False) -> Optional[str]:
         """
         绘制资金曲线
 
@@ -94,6 +95,7 @@ class ReportGenerator:
             benchmark_history: benchmark历史数据（可选，DataFrame需包含date和benchmark_value列）
             save: 是否保存图片
             show: 是否显示图片
+            log_scale: 是否使用对数坐标轴（默认False，使用线性坐标）
 
         Returns:
             图片文件路径（如果保存）
@@ -123,6 +125,11 @@ class ReportGenerator:
         ax1.set_ylabel('Assets (CNY)', fontsize=12)
         ax1.legend(loc='best')
         ax1.grid(True, alpha=0.3)
+
+        # 设置对数坐标（如果启用）
+        if log_scale:
+            ax1.set_yscale('log')
+            logger.info("使用对数坐标轴绘制资金曲线")
 
         # 绘制回撤
         equity_curve = df['total_value'].values
@@ -442,7 +449,8 @@ class ReportGenerator:
                          portfolio=None,
                          data_handler=None,
                          start_date=None,
-                         end_date=None) -> Dict[str, str]:
+                         end_date=None,
+                         strategy=None) -> Dict[str, str]:
         """
         导出所有数据到CSV文件
 
@@ -453,6 +461,7 @@ class ReportGenerator:
             data_handler: 数据处理器（可选）
             start_date: 开始日期（可选）
             end_date: 结束日期（可选）
+            strategy: 策略对象（可选，用于导出预测历史和策略参数）
 
         Returns:
             文件路径字典
@@ -472,6 +481,14 @@ class ReportGenerator:
             filepaths['detailed_positions'] = self.export_detailed_positions_to_csv(
                 portfolio, data_handler, start_date, end_date
             )
+
+        # 导出预测历史（如果提供strategy）
+        if strategy and hasattr(strategy, 'prediction_history'):
+            filepaths['prediction_history'] = self.export_prediction_history_to_csv(strategy)
+
+        # 导出策略参数（如果提供strategy）
+        if strategy and hasattr(strategy, 'params'):
+            filepaths['strategy_params'] = self.export_strategy_params_to_json(strategy)
 
         return filepaths
 
@@ -588,6 +605,112 @@ class ReportGenerator:
         logger.info(f"  - 总盈利: {trade_analysis.get('total_profit', 0):,.2f} 元")
         logger.info(f"  - 总亏损: {trade_analysis.get('total_loss', 0):,.2f} 元")
         logger.info(f"  - 净盈亏: {trade_analysis.get('total_pnl', 0):,.2f} 元")
+
+        return filepath
+
+    def export_prediction_history_to_csv(self,
+                                        strategy,
+                                        filename: Optional[str] = None) -> str:
+        """
+        导出策略预测历史到CSV文件
+
+        Args:
+            strategy: 策略对象（需要有 prediction_history 属性）
+            filename: 文件名（可选）
+
+        Returns:
+            CSV文件路径
+        """
+        # 检查策略是否有 prediction_history
+        if not hasattr(strategy, 'prediction_history'):
+            logger.warning("策略不支持 prediction_history")
+            return ""
+
+        # 获取预测历史
+        prediction_history = strategy.prediction_history
+
+        if not prediction_history:
+            logger.warning("没有预测历史记录")
+            return ""
+
+        # 展开预测历史为DataFrame
+        records = []
+        for record in prediction_history:
+            pred_date = record['date']
+            for rank, (code, score) in enumerate(record['predictions'], start=1):
+                records.append({
+                    'Date': pred_date,
+                    'Rank': rank,
+                    'Stock Code': code,
+                    'Prediction Score': score
+                })
+
+        if not records:
+            logger.warning("预测历史记录为空")
+            return ""
+
+        # 转换为DataFrame
+        df = pd.DataFrame(records)
+
+        # 生成文件名
+        if not filename:
+            filename = "prediction_history.csv"
+
+        filepath = os.path.join(self.output_dir, filename)
+        df.to_csv(filepath, index=False, encoding='utf-8-sig')
+
+        # 打印统计信息
+        logger.info(f"预测历史已导出到: {filepath}")
+        logger.info(f"  - 预测次数: {len(prediction_history)}")
+        logger.info(f"  - 总记录数: {len(df)}")
+        logger.info(f"  - 日期范围: {df['Date'].min()} 至 {df['Date'].max()}")
+        logger.info(f"  - 每次预测前: {df['Rank'].max()} 名")
+
+        return filepath
+
+    def export_strategy_params_to_json(self,
+                                      strategy,
+                                      filename: Optional[str] = None) -> str:
+        """
+        导出策略参数到JSON文件
+
+        Args:
+            strategy: 策略对象
+            filename: 文件名（可选）
+
+        Returns:
+            JSON文件路径
+        """
+        import json
+
+        # 获取策略参数
+        if not hasattr(strategy, 'params'):
+            logger.warning("策略没有 params 属性")
+            return ""
+
+        params = strategy.params
+
+        # 生成文件名
+        if not filename:
+            filename = "strategy_params.json"
+
+        filepath = os.path.join(self.output_dir, filename)
+
+        # 准备导出数据
+        export_data = {
+            'strategy_name': strategy.name if hasattr(strategy, 'name') else 'Unknown',
+            'strategy_type': strategy.__class__.__name__,
+            'parameters': params
+        }
+
+        # 保存到JSON文件
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(export_data, f, indent=2, ensure_ascii=False, default=str)
+
+        logger.info(f"策略参数已导出到: {filepath}")
+        logger.info(f"  - 策略名称: {export_data['strategy_name']}")
+        logger.info(f"  - 策略类型: {export_data['strategy_type']}")
+        logger.info(f"  - 参数数量: {len(params)}")
 
         return filepath
 
