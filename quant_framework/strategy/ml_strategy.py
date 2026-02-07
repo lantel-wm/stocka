@@ -121,22 +121,24 @@ class MLStrategy(BaseStrategy):
     """
     基于机器学习模型的选股策略
 
-    策略逻辑: 
+    策略逻辑:
     1. 每隔 N 个交易日使用模型对所有股票进行预测
     2. 选取预测分数最高的前 K 只股票
-    3. 卖出不在新选中的持仓股票
-    4. 买入新选中的股票 (等权重或按预测分数加权)
+    3. 从 top K 中过滤掉预测分数低于阈值的股票（如果设置了 min_score）
+    4. 卖出不在新选中的持仓股票
+    5. 买入新选中的股票 (等权重或按预测分数加权)
 
-    参数说明: 
+    参数说明:
     - model_path: 模型文件路径 (.pkl 或 .txt)
-    - top_k: 选取预测分数最高的前 K 只股票 (默认: 30)
-    - rebalance_days: 调仓周期 (天数), 每 N 个交易日调仓一次 (默认: 20)
+    - top_k: 选取预测分数最高的前 K 只股票 (默认: 10)
+    - rebalance_days: 调仓周期 (天数), 每 N 个交易日调仓一次 (默认: 5)
     - weight_method: 仓位分配方式, 'equal'等权重 或 'score'按分数加权 (默认: 'equal')
-    - min_score: 最低预测分数阈值, 低于此值的股票不会被选中 (默认: None)
+    - min_score: 最低预测分数阈值, 从 top_k 中过滤掉低于此值的股票 (默认: None, 不启用)
+                  例如设置为 0.01，则只持有 top_k 中预测分数 >= 0.01 的股票
     - hold_days: 持有天数, 0 表示不限制 (默认: 0)
     - stock_pool: 股票池, None 表示使用全部股票 (默认: None)
     - norm_method: 标准化方法, "zscore" 或 "robust" (默认: "zscore")
-    - stop_loss: 止损阈值 (百分比), 如 0.05 表示亏损 5% 时止损 (默认: None, 不启用)
+    - stop_loss: 止损阈值 (百分比), 如 0.05 表示亏损 5% 时止损 (默认: 0.05)
     - stop_loss_check_daily: 是否每日检查止损, False 表示只在调仓日检查 (默认: True)
     """
 
@@ -158,6 +160,8 @@ class MLStrategy(BaseStrategy):
             'norm_method': 'zscore',     # 标准化方法
             'stop_loss': 0.05,           # 止损阈值 (百分比)
             'stop_loss_check_daily': True,  # 是否每日检查止损
+            'trailing_stop_percent': None,   # 移动止损百分比 (如 0.05 = 5%)
+            'trailing_stop_activation': 0.0, # 移动止损激活阈值 (如 0.03 = 盈利3%后启用)
         }
 
         if params:
@@ -185,12 +189,22 @@ class MLStrategy(BaseStrategy):
 
         logger.info(f"模型加载成功")
         logger.info(f"  - 因子数量: {len(self.factors)}")
-        logger.info(f"  - 选股数量: {self.params['top_k']}")
+        logger.info(f"  - 选股数量 (top_k): {self.params['top_k']}")
         logger.info(f"  - 调仓周期: 每 {self.params['rebalance_days']} 个交易日")
+        logger.info(f"  - 仓位分配: {self.params['weight_method']}")
         logger.info(f"  - 标准化方法: {self.params['norm_method']}")
+        if self.params['min_score'] is not None:
+            logger.info(f"  - 预测分数阈值: >= {self.params['min_score']:.4f}")
+        else:
+            logger.info(f"  - 预测分数阈值: 未启用")
         if self.params['stop_loss'] is not None:
-            logger.info(f"  - 止损阈值: {self.params['stop_loss']*100:.2f}%")
+            logger.info(f"  - 固定止损阈值: {self.params['stop_loss']*100:.2f}%")
             logger.info(f"  - 止损检查: {'每日' if self.params['stop_loss_check_daily'] else '仅调仓日'}")
+        if self.params['trailing_stop_percent'] is not None:
+            logger.info(f"  - 移动止损: {self.params['trailing_stop_percent']*100:.2f}%")
+            logger.info(f"  - 移动止损激活阈值: {self.params['trailing_stop_activation']*100:.2f}%")
+        else:
+            logger.info(f"  - 移动止损: 未启用")
 
         # 跟踪状态
         self.last_rebalance_date = None  # 上次调仓日期
@@ -201,6 +215,10 @@ class MLStrategy(BaseStrategy):
         # 实盘模式支持
         self.trading_dates = []          # 交易日历列表
         self.strategy_start_date = None  # 策略开始运行日期
+
+        # 预测记录（用于回测分析）
+        # 格式: [{'date': date, 'predictions': [(code, score), ...]}, ...]
+        self.prediction_history = []    # 每次预测的前20名股票记录
 
     def on_bar(self, data_handler, current_date: date, portfolio) -> List[Signal]:
         """
@@ -220,8 +238,11 @@ class MLStrategy(BaseStrategy):
         self.trading_days_count += 1
 
         # 检查止损 (每日或调仓日)
-        if self.params['stop_loss'] is not None:
+        if self.params['stop_loss'] is not None or self.params['trailing_stop_percent'] is not None:
             if self.params['stop_loss_check_daily'] or self._is_rebalance_day(current_date):
+                # 先更新持仓的最高价格（用于移动止损）
+                self._update_highest_price(data_handler, current_date)
+                # 再检查止损
                 stop_loss_signals = self._check_stop_loss(
                     data_handler, current_date, portfolio
                 )
@@ -243,15 +264,17 @@ class MLStrategy(BaseStrategy):
 
         # 使用模型预测
         predictions = self.model.predict(pred_data)
-        
+
+        # 保存前20名的预测结果
+        self._save_top_predictions(current_date, predictions)
+
         # 选股
         selected_stocks = self._select_stocks(predictions, pred_data)
 
         if not selected_stocks:
-            logger.warning(f"{current_date}: 没有选中任何股票")
-            return signals
+            logger.warning(f"{current_date}: 没有选中任何股票，将清仓所有持仓")
 
-        # 生成交易信号
+        # 生成交易信号（即使没有选中股票，也会卖出所有当前持仓）
         signals = self._generate_signals(
             current_date,
             selected_stocks,
@@ -524,9 +547,47 @@ class MLStrategy(BaseStrategy):
 
         return pred_data
 
+    def _save_top_predictions(self, current_date: date, predictions: pd.Series, top_n: int = 20) -> None:
+        """
+        保存前N名的预测结果
+
+        Args:
+            current_date: 当前日期
+            predictions: 预测分数 Series (index为股票代码)
+            top_n: 保存前N名 (默认: 20)
+        """
+        try:
+            # 创建 DataFrame 并按分数降序排序
+            pred_df = pd.DataFrame({
+                'code': predictions.index,
+                'score': predictions.values
+            }).sort_values('score', ascending=False)
+
+            # 取前 top_n 名
+            top_predictions = pred_df.head(top_n)
+
+            # 转换为列表格式
+            predictions_list = [(row['code'], row['score']) for _, row in top_predictions.iterrows()]
+
+            # 保存到历史记录
+            self.prediction_history.append({
+                'date': current_date,
+                'predictions': predictions_list
+            })
+
+            logger.debug(f"{current_date}: 已保存前 {len(predictions_list)} 名预测结果")
+
+        except Exception as e:
+            logger.warning(f"保存预测结果时出错: {e}")
+
     def _select_stocks(self, predictions: pd.Series, pred_data: pd.DataFrame) -> List[Dict]:
         """
         根据预测分数选股
+
+        选股逻辑：
+        1. 先选出预测分数最高的 top_k 只股票
+        2. 从 top_k 中过滤掉预测分数低于 min_score 的股票
+        3. 对过滤后的股票分配权重
 
         Args:
             predictions: 预测分数 Series
@@ -545,32 +606,45 @@ class MLStrategy(BaseStrategy):
             'score': predictions.values
         })
 
-        # 过滤低于最低分数的股票
-        if min_score is not None:
-            result_df = result_df[result_df['score'] >= min_score]
-
-        if len(result_df) == 0:
-            return []
-
         # 按分数降序排序
         result_df = result_df.sort_values('score', ascending=False)
 
-        # 选取前 K 只
-        result_df = result_df.head(top_k)
+        # 先选取前 K 只
+        top_k_df = result_df.head(top_k)
+
+        # 从 top_k 中过滤低于最低分数的股票
+        if min_score is not None:
+            filtered_df = top_k_df[top_k_df['score'] >= min_score].copy()
+        else:
+            filtered_df = top_k_df.copy()
+
+        if len(filtered_df) == 0:
+            logger.info(f"  - Top {top_k} 只股票中，没有预测分数 >= {min_score} 的股票，本次不持仓")
+            return []
+
+        filtered_count = len(top_k_df) - len(filtered_df)
+        if filtered_count > 0:
+            logger.info(f"  - Top {top_k} 中有 {filtered_count} 只股票因预测分数低于阈值 {min_score} 被过滤")
 
         # 计算权重
         if weight_method == 'equal':
             # 等权重
-            result_df['weight'] = 1.0 / len(result_df)
+            filtered_df = filtered_df.copy()
+            # filtered_df['weight'] = 1.0 / len(filtered_df)
+            # 过滤后不要全仓买入
+            filtered_df['weight'] = 1.0 / top_k
         elif weight_method == 'score':
             # 按分数加权
-            total_score = result_df['score'].sum()
-            result_df['weight'] = result_df['score'] / total_score
+            total_score = filtered_df['score'].sum()
+            filtered_df = filtered_df.copy()
+            filtered_df['weight'] = filtered_df['score'] / total_score
         else:
             raise ValueError(f"不支持的权重分配方式: {weight_method}")
 
         # 转换为字典列表
-        selected = result_df.to_dict('records')
+        selected = filtered_df.to_dict('records')
+
+        logger.info(f"  - 最终选中 {len(selected)} 只股票 (从 top {top_k} 中筛选，阈值: {min_score})")
 
         return selected
 
@@ -616,6 +690,14 @@ class MLStrategy(BaseStrategy):
                     logger.warning(f"{current_date}: 跳过卖出 {code}, 无法获取价格")
                     continue
 
+                # 计算盈亏率（如果有买入记录）
+                if code in self.position_entries:
+                    entry_price = self.position_entries[code]['entry_price']
+                    return_rate = (price - entry_price) / entry_price
+                    reason = f"不在新选中的股票中: 买入价={entry_price:.2f}, 当前价={price:.2f}, 收益率={return_rate*100:.2f}%"
+                else:
+                    reason = "不在新选中的股票中"
+
                 # 生成卖出信号
                 signal = Signal()
                 signal.date = current_date
@@ -623,7 +705,7 @@ class MLStrategy(BaseStrategy):
                 signal.signal_type = Signal.SELL
                 signal.price = price
                 signal.weight = 1.0  # 全部卖出
-                signal.reason = f"不在新选中的股票中"
+                signal.reason = reason
 
                 signals.append(signal)
 
@@ -659,10 +741,11 @@ class MLStrategy(BaseStrategy):
 
             signals.append(signal)
 
-            # 记录买入日期和买入价格
+            # 记录买入日期、买入价格和最高价格（用于移动止损）
             self.position_entries[code] = {
                 'entry_date': current_date,
-                'entry_price': price
+                'entry_price': price,
+                'highest_price': price  # 初始化最高价格为买入价
             }
 
         return signals
@@ -697,9 +780,39 @@ class MLStrategy(BaseStrategy):
         except Exception:
             return None
 
+    def _update_highest_price(self, data_handler: DataHandler, current_date: date) -> None:
+        """
+        更新持仓的最高价格（用于移动止损）
+
+        Args:
+            data_handler: 数据处理器
+            current_date: 当前日期
+        """
+        for code in list(self.position_entries.keys()):
+            try:
+                current_price = self._get_current_price(data_handler, current_date, code)
+
+                if current_price is not None:
+                    entry = self.position_entries[code]
+
+                    # 更新最高价格（只能上移，不能下移）
+                    if current_price > entry.get('highest_price', entry['entry_price']):
+                        entry['highest_price'] = current_price
+
+            except Exception:
+                # 获取价格失败，跳过
+                continue
+
     def _check_stop_loss(self, data_handler: DataHandler, current_date: date, portfolio) -> List[Signal]:
         """
-        检查并执行止损
+        检查并执行止损（支持固定止损和移动止损）
+
+        止损逻辑：
+        1. 如果启用移动止损且盈利超过激活阈值：
+           使用移动止损：stop_price = highest_price * (1 - trailing_stop_percent)
+        2. 否则如果启用固定止损：
+           使用固定止损：stop_price = entry_price * (1 - stop_loss)
+        3. 如果 current_price < stop_price，触发止损
 
         Args:
             data_handler: 数据处理器
@@ -711,6 +824,12 @@ class MLStrategy(BaseStrategy):
         """
         signals = []
         stop_loss_threshold = self.params['stop_loss']
+        trailing_stop_percent = self.params['trailing_stop_percent']
+        trailing_stop_activation = self.params['trailing_stop_activation']
+
+        # 如果没有启用任何止损，直接返回
+        if stop_loss_threshold is None and trailing_stop_percent is None:
+            return signals
 
         # 获取当前持仓
         current_positions = portfolio.positions
@@ -723,6 +842,7 @@ class MLStrategy(BaseStrategy):
 
             entry_info = self.position_entries[code]
             entry_price = entry_info['entry_price']
+            highest_price = entry_info.get('highest_price', entry_price)
 
             # 获取当前价格
             current_price = self._get_current_price(data_handler, current_date, code)
@@ -733,8 +853,22 @@ class MLStrategy(BaseStrategy):
             # 计算收益率
             return_rate = (current_price - entry_price) / entry_price
 
+            # 确定止损价格
+            stop_price = None
+            stop_type = None
+
+            # 1. 检查是否启用移动止损且盈利超过激活阈值
+            if trailing_stop_percent is not None and return_rate >= trailing_stop_activation:
+                # 使用移动止损
+                stop_price = highest_price * (1 - trailing_stop_percent)
+                stop_type = "移动止损"
+            # 2. 否则使用固定止损（如果启用）
+            elif stop_loss_threshold is not None:
+                stop_price = entry_price * (1 - stop_loss_threshold)
+                stop_type = "固定止损"
+
             # 检查是否触发止损
-            if return_rate <= -stop_loss_threshold:
+            if stop_price is not None and current_price < stop_price:
                 # 生成卖出信号
                 signal = Signal()
                 signal.date = current_date
@@ -742,15 +876,23 @@ class MLStrategy(BaseStrategy):
                 signal.signal_type = Signal.SELL
                 signal.price = current_price
                 signal.weight = 1.0  # 全部卖出
-                signal.reason = f"止损触发: 买入价={entry_price:.2f}, 当前价={current_price:.2f}, 收益率={return_rate*100:.2f}%"
+
+                # 构建止损原因
+                if trailing_stop_percent is not None and return_rate >= trailing_stop_activation:
+                    signal.reason = (f"{stop_type}触发: 买入价={entry_price:.2f}, 最高价={highest_price:.2f}, "
+                                   f"当前价={current_price:.2f}, 收益率={return_rate*100:.2f}%")
+                else:
+                    signal.reason = (f"{stop_type}触发: 买入价={entry_price:.2f}, "
+                                   f"当前价={current_price:.2f}, 收益率={return_rate*100:.2f}%")
 
                 signals.append(signal)
 
                 # 清除持仓记录
                 del self.position_entries[code]
 
-                logger.info(f"{current_date}: 止损卖出 {code}, 买入价={entry_price:.2f}, "
-                      f"当前价={current_price:.2f}, 亏损={return_rate*100:.2f}%")
+                logger.info(f"{current_date}: {stop_type}卖出 {code}, 买入价={entry_price:.2f}, "
+                          f"最高价={highest_price:.2f}, 当前价={current_price:.2f}, "
+                          f"收益率={return_rate*100:.2f}%")
 
         return signals
 
@@ -760,6 +902,7 @@ class MLStrategy(BaseStrategy):
         self.last_rebalance_date = None
         self.trading_days_count = 0
         self.position_entries = {}
+        self.prediction_history = []  # 清空预测历史
 
     def initialize_for_live_trading(self,
                                    data_handler,
@@ -938,3 +1081,57 @@ class MLStrategy(BaseStrategy):
                 pass
 
         return info
+
+    def get_prediction_history(self) -> List[Dict]:
+        """
+        获取预测历史记录
+
+        Returns:
+            预测历史记录列表，每个元素格式:
+            {
+                'date': date,
+                'predictions': [(code, score), ...]  # 前20名
+            }
+        """
+        return self.prediction_history
+
+    def get_prediction_history_df(self) -> pd.DataFrame:
+        """
+        获取预测历史记录的DataFrame格式
+
+        Returns:
+            DataFrame，包含列: date, rank, code, score
+        """
+        if not self.prediction_history:
+            return pd.DataFrame(columns=['date', 'rank', 'code', 'score'])
+
+        # 展开预测历史
+        records = []
+        for record in self.prediction_history:
+            pred_date = record['date']
+            for rank, (code, score) in enumerate(record['predictions'], start=1):
+                records.append({
+                    'date': pred_date,
+                    'rank': rank,
+                    'code': code,
+                    'score': score
+                })
+
+        return pd.DataFrame(records)
+
+    def save_prediction_history(self, file_path: str) -> None:
+        """
+        保存预测历史到CSV文件
+
+        Args:
+            file_path: 保存路径 (例如: 'predictions.csv')
+        """
+        df = self.get_prediction_history_df()
+
+        if not df.empty:
+            df.to_csv(file_path, index=False, encoding='utf-8-sig')
+            logger.info(f"预测历史已保存到: {file_path}")
+            logger.info(f"  - 记录数: {len(df)}")
+            logger.info(f"  - 日期范围: {df['date'].min()} 至 {df['date'].max()}")
+        else:
+            logger.warning("没有预测历史记录可保存")
