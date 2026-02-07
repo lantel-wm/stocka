@@ -95,26 +95,32 @@ class TestFactorHandler(unittest.TestCase):
         """测试因子注册"""
         self.handler._init_factor_tables()
 
-        # 注册因子
-        factor_id = self.handler.register_factor('TEST_FACTOR', 'custom', '测试因子')
+        # 注册因子（指定ID）
+        factor_id = self.handler.register_factor(1, 'TEST_FACTOR', 'custom', '测试因子')
 
         self.assertIsNotNone(factor_id)
         self.assertEqual(factor_id, 1)
 
         # 重复注册应返回相同的ID
-        factor_id2 = self.handler.register_factor('TEST_FACTOR', 'custom', '测试因子')
+        factor_id2 = self.handler.register_factor(1, 'TEST_FACTOR', 'custom', '测试因子')
         self.assertEqual(factor_id, factor_id2)
+
+        # 测试冲突处理
+        with self.assertRaises(ValueError):
+            # 尝试用不同名称注册已存在的ID
+            self.handler.register_factor(1, 'OTHER_FACTOR', 'custom', '其他因子')
 
     def test_get_factor_id(self):
         """测试获取因子ID"""
         self.handler._init_factor_tables()
 
-        # 注册因子
-        self.handler.register_factor('MA5', 'alpha158', '5日均线')
+        # 注册因子（指定ID）
+        self.handler.register_factor(18, 'MA5', 'alpha158', '5日均线')
 
         # 获取因子ID
         factor_id = self.handler.get_factor_id('MA5')
         self.assertIsNotNone(factor_id)
+        self.assertEqual(factor_id, 18)
 
         # 获取不存在的因子
         factor_id_none = self.handler.get_factor_id('NOT_EXIST')
@@ -124,10 +130,10 @@ class TestFactorHandler(unittest.TestCase):
         """测试获取可用因子列表"""
         self.handler._init_factor_tables()
 
-        # 注册多个因子
-        self.handler.register_factor('MA5', 'alpha158', '5日均线')
-        self.handler.register_factor('MA10', 'alpha158', '10日均线')
-        self.handler.register_factor('CUSTOM_FACTOR', 'custom', '自定义因子')
+        # 注册多个因子（指定ID）
+        self.handler.register_factor(18, 'MA5', 'alpha158', '5日均线')
+        self.handler.register_factor(19, 'MA10', 'alpha158', '10日均线')
+        self.handler.register_factor(1000, 'CUSTOM_FACTOR', 'custom', '自定义因子')
 
         # 获取因子列表
         factors = self.handler.get_available_factors()
@@ -141,9 +147,9 @@ class TestFactorHandler(unittest.TestCase):
         """测试保存和查询因子值"""
         self.handler._init_factor_tables()
 
-        # 注册因子
-        self.handler.register_factor('MA5', 'alpha158', '5日均线')
-        self.handler.register_factor('MA10', 'alpha158', '10日均线')
+        # 注册因子（指定ID）
+        self.handler.register_factor(18, 'MA5', 'alpha158', '5日均线')
+        self.handler.register_factor(19, 'MA10', 'alpha158', '10日均线')
 
         # 准备测试数据
         factor_df = pd.DataFrame({
@@ -171,8 +177,8 @@ class TestFactorHandler(unittest.TestCase):
         """测试获取单只股票的时序因子"""
         self.handler._init_factor_tables()
 
-        # 注册因子
-        self.handler.register_factor('MA5', 'alpha158', '5日均线')
+        # 注册因子（指定ID）
+        self.handler.register_factor(18, 'MA5', 'alpha158', '5日均线')
 
         # 保存多个日期的数据
         factor_df1 = pd.DataFrame({
@@ -203,9 +209,9 @@ class TestFactorHandler(unittest.TestCase):
         """测试获取宽表格式的因子数据"""
         self.handler._init_factor_tables()
 
-        # 注册因子
-        self.handler.register_factor('MA5', 'alpha158', '5日均线')
-        self.handler.register_factor('MA10', 'alpha158', '10日均线')
+        # 注册因子（指定ID）
+        self.handler.register_factor(18, 'MA5', 'alpha158', '5日均线')
+        self.handler.register_factor(19, 'MA10', 'alpha158', '10日均线')
 
         # 保存因子
         factor_df = pd.DataFrame({
@@ -234,9 +240,9 @@ class TestFactorHandler(unittest.TestCase):
         """测试获取因子定义信息"""
         self.handler._init_factor_tables()
 
-        # 注册因子
-        self.handler.register_factor('MA5', 'alpha158', '5日均线')
-        self.handler.register_factor('CUSTOM_FACTOR', 'custom', '自定义因子')
+        # 注册因子（指定ID）
+        self.handler.register_factor(18, 'MA5', 'alpha158', '5日均线')
+        self.handler.register_factor(1000, 'CUSTOM_FACTOR', 'custom', '自定义因子')
 
         # 获取因子信息
         factor_info = self.handler.get_factor_info()
@@ -250,8 +256,8 @@ class TestFactorHandler(unittest.TestCase):
         """测试保存包含NaN的因子数据"""
         self.handler._init_factor_tables()
 
-        # 注册因子
-        self.handler.register_factor('MA5', 'alpha158', '5日均线')
+        # 注册因子（指定ID）
+        self.handler.register_factor(18, 'MA5', 'alpha158', '5日均线')
 
         # 准备包含NaN的数据
         factor_df = pd.DataFrame({
