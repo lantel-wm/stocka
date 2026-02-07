@@ -9,7 +9,7 @@ from datetime import datetime, date
 import pandas as pd
 import gc
 
-from ..data.data_handler import DataHandler
+from ..data.data_handler_file import DataHandlerF
 from ..strategy.ml_strategy import MLStrategy
 from ..backtest.engine import BacktestEngine
 from ..execution.transaction_cost import StandardCost
@@ -141,13 +141,13 @@ class MLPipeline:
 
         logger.info(f"使用因子数量: {len(self.config['factors'])}")
 
-        # 创建单个 DataHandler 加载训练+验证集的所有数据
+        # 创建单个 DataHandlerF 加载训练+验证集的所有数据
         # 这样可以避免重复加载相同的数据文件
         combined_start = str_to_date(self.config['train_start'])
         combined_end = str_to_date(self.config['valid_end'])
 
         logger.info(f"加载训练+验证集数据: {self.config['train_start']} 至 {self.config['valid_end']}")
-        combined_data_handler = DataHandler(
+        combined_data_handler = DataHandlerF(
             data_path=self.config['data_path'],
             min_data_points=self.config['min_data_points'],
             use_parquet=self.config.get('use_parquet', True),
@@ -158,7 +158,7 @@ class MLPipeline:
             end_date=combined_end
         )
 
-        # 创建训练集 DataLoader（会从 DataHandler 中筛选训练日期范围的数据）
+        # 创建训练集 DataLoader（会从 DataHandlerF 中筛选训练日期范围的数据）
         train_loader = DataLoader(
             segment='train',
             data_handler=combined_data_handler,
@@ -169,7 +169,7 @@ class MLPipeline:
             norm_method=self.config.get('norm_method', 'zscore')
         )
 
-        # 创建验证集 DataLoader（会从同一个 DataHandler 中筛选验证日期范围的数据）
+        # 创建验证集 DataLoader（会从同一个 DataHandlerF 中筛选验证日期范围的数据）
         valid_loader = DataLoader(
             segment='valid',
             data_handler=combined_data_handler,
@@ -212,7 +212,7 @@ class MLPipeline:
         if hasattr(self.model_trainer, 'valid_df'):
             self.model_trainer.valid_df = None
 
-        # 清理 DataHandler
+        # 清理 DataHandlerF
         combined_data_handler.all_data = None
         combined_data_handler = None
 
@@ -236,8 +236,8 @@ class MLPipeline:
         if self.model is None:
             raise ValueError("模型尚未训练，请先调用run_training()")
 
-        # 创建测试集 DataHandler
-        test_data_handler = DataHandler(
+        # 创建测试集 DataHandlerF
+        test_data_handler = DataHandlerF(
             data_path=self.config['data_path'],
             min_data_points=self.config['min_data_points'],
             use_parquet=self.config.get('use_parquet', True),
@@ -287,7 +287,7 @@ class MLPipeline:
         if hasattr(self.model_evaluator, 'test_loader'):
             self.model_evaluator.test_loader = None
 
-        # 清理 DataHandler
+        # 清理 DataHandlerF
         test_data_handler.all_data = None
         test_data_handler = None
 
@@ -311,8 +311,8 @@ class MLPipeline:
         if self.model is None:
             raise ValueError("模型尚未训练，请先调用run_training()")
 
-        # 创建回测专用的 DataHandler
-        backtest_data_handler = DataHandler(
+        # 创建回测专用的 DataHandlerF
+        backtest_data_handler = DataHandlerF(
             data_path=self.config['data_path'],
             min_data_points=self.config['min_data_points'],
             use_parquet=self.config.get('use_parquet', True),
@@ -350,7 +350,7 @@ class MLPipeline:
         # ====== 内存清理 ======
         logger.info("\n清理回测阶段内存...")
         # 注意：不能清理 backtest_engine 和 backtest_results，因为 save_results() 还需要使用
-        # 只清理 DataHandler
+        # 只清理 DataHandlerF
         backtest_data_handler.all_data = None
         backtest_data_handler = None
 
