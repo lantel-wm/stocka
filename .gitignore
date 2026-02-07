@@ -53,11 +53,12 @@ htmlcov/
 .LSOverride
 
 # Data files (避免提交大量数据文件)
-data/stock/
-data/**/*.csv
-data/**/*.parquet
-data/**/*.h5
-data/**/*.hdf5
+# 只忽略项目根目录下的data目录，不忽略quant_framework/data
+/data/stock/
+/data/**/*.csv
+/data/**/*.parquet
+/data/**/*.h5
+/data/**/*.hdf5
 
 # Output files
 reports/
@@ -110,8 +111,8 @@ strategy_results/
 *.cache
 ckpt/
 
-# data
-data/
+# data (只忽略根目录下的data目录)
+/data/
 examples/data/
 examples/examples/
 examples/reports/
