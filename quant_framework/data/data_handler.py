@@ -104,6 +104,36 @@ class DataHandler:
 
         return self.con.execute(query, params).df()
 
+    def get_stock_latest_date(self, code: str) -> tuple:
+        """
+        获取单只股票数据的日期范围
+
+        Args:
+            code: 股票代码
+
+        Returns:
+            (start_date, end_date) 日期元组，格式为 date 对象，如果无数据返回 (None, None)
+
+        Example:
+            >>> start, end = handler.get_stock_latest_date('600000')
+            >>> print(f"数据范围: {start} 至 {end}")
+        """
+        try:
+            result = self.con.execute(f"""
+                SELECT
+                    MIN(date) as start_date,
+                    MAX(date) as end_date
+                FROM {self.TABLE_PRICES}
+                WHERE code = ?
+            """, [str(code)]).fetchone()
+
+            if result and result[0] is not None:
+                return (result[0], result[1])
+            return (None, None)
+
+        except Exception:
+            return (None, None)
+
     def get_data_before(self, code: str, date: date) -> pd.DataFrame:
         """
         获取指定日期之前的数据（避免未来函数）
@@ -262,12 +292,37 @@ class DataHandler:
 
         Args:
             new_data: 新的日线数据
+
+        Note:
+            自动过滤掉数据库表中不存在的列，避免列数不匹配错误
         """
         # 确保日期格式
         new_data['date'] = pd.to_datetime(new_data['date'])
 
+        # 获取数据库表的列名
+        table_columns = self.con.execute(f"""
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = '{self.TABLE_PRICES}'
+            ORDER BY ordinal_position
+        """).fetchdf()['column_name'].tolist()
+
+        # 只选择数据库表中存在的列
+        available_columns = [col for col in table_columns if col in new_data.columns]
+
+        if len(available_columns) < len(table_columns):
+            missing_columns = set(table_columns) - set(available_columns)
+            raise ValueError(f"数据缺少必需的列: {missing_columns}")
+
+        # 选择需要的列并按表顺序排列
+        filtered_data = new_data[available_columns].copy()
+
+        # 确保 code 列是字符串类型，避免 DuckDB 类型推断问题
+        if 'code' in filtered_data.columns:
+            filtered_data['code'] = filtered_data['code'].astype('string')
+
         # 插入数据库
-        self.con.register('temp_new_data', new_data)
+        self.con.register('temp_new_data', filtered_data)
         self.con.execute(f"INSERT OR REPLACE INTO {self.TABLE_PRICES} SELECT * FROM temp_new_data")
         self.con.unregister('temp_new_data')
 
@@ -665,6 +720,7 @@ class DataHandler:
 
         Args:
             factor_df: 因子DataFrame，索引为stock_code，列为因子名称
+                      或者包含 'code' 列作为股票代码
             trade_date: 交易日期
 
         Example:
@@ -674,6 +730,9 @@ class DataHandler:
             ... }, index=['000001', '000002', '600000'])
             >>> handler.save_factors(factors, date(2024, 1, 10))
         """
+        # 如果 code 在列中而不是索引中，将其设置为索引
+        if 'code' in factor_df.columns and factor_df.index.name != 'code':
+            factor_df = factor_df.set_index('code')
         # 批量获取所有因子的ID（一次性查询，避免循环查询）
         factor_names = list(factor_df.columns)
         factor_ids = {}
@@ -712,10 +771,16 @@ class DataHandler:
 
         # 批量插入
         insert_df = pd.DataFrame(records)
+        # 显式将 stock_code 列设置为字符串类型，避免 DuckDB 类型推断为整数
+        insert_df = insert_df.astype({'stock_code': 'string'})
         self.con.register('temp_factor_data', insert_df)
         self.con.execute(f"""
             INSERT OR REPLACE INTO {self.TABLE_FACTOR_DATA}
-            SELECT trade_date, stock_code, factor_id, factor_value
+            SELECT
+                trade_date,
+                stock_code,
+                factor_id,
+                factor_value
             FROM temp_factor_data
         """)
         self.con.unregister('temp_factor_data')
@@ -752,7 +817,7 @@ class DataHandler:
             """
             params = [trade_date] + factor_ids
         else:
-            query = """
+            query = f"""
                 SELECT fd.stock_code, fd.factor_value, fdef.factor_name
                 FROM {self.TABLE_FACTOR_DATA} fd
                 JOIN {self.TABLE_FACTOR_DEFINITIONS} fdef ON fd.factor_id = fdef.factor_id
@@ -790,15 +855,39 @@ class DataHandler:
         Returns:
             DataFrame，索引为trade_date，列为factor_names
         """
-        # 构建查询
-        query = """
-            SELECT fd.trade_date, fd.factor_value, fdef.factor_name
-            FROM factor_data fd
-            JOIN factor_definitions fdef ON fd.factor_id = fdef.factor_id
-            WHERE fd.stock_code = ?
-        """
-        params = [str(stock_code)]
+        # 确保 stock_code 是字符串类型
+        stock_code = str(stock_code)
 
+        # 构建查询
+        if factor_names is not None:
+            # 获取因子ID列表
+            factor_ids = []
+            for name in factor_names:
+                factor_id = self.get_factor_id(name)
+                if factor_id:
+                    factor_ids.append(factor_id)
+
+            if not factor_ids:
+                return pd.DataFrame()
+
+            placeholders = ','.join(['?' for _ in factor_ids])
+            query = f"""
+                SELECT fd.trade_date, fd.factor_value, fdef.factor_name
+                FROM {self.TABLE_FACTOR_DATA} fd
+                JOIN {self.TABLE_FACTOR_DEFINITIONS} fdef ON fd.factor_id = fdef.factor_id
+                WHERE fd.stock_code = ? AND fd.factor_id IN ({placeholders})
+            """
+            params = [stock_code] + factor_ids
+        else:
+            query = f"""
+                SELECT fd.trade_date, fd.factor_value, fdef.factor_name
+                FROM {self.TABLE_FACTOR_DATA} fd
+                JOIN {self.TABLE_FACTOR_DEFINITIONS} fdef ON fd.factor_id = fdef.factor_id
+                WHERE fd.stock_code = ?
+            """
+            params = [stock_code]
+
+        # 添加日期过滤
         if start_date:
             query += " AND fd.trade_date >= ?"
             params.append(start_date)
@@ -806,20 +895,6 @@ class DataHandler:
         if end_date:
             query += " AND fd.trade_date <= ?"
             params.append(end_date)
-
-        if factor_names:
-            factor_ids = []
-            for name in factor_names:
-                factor_id = self.get_factor_id(name)
-                if factor_id:
-                    factor_ids.append(factor_id)
-
-            if factor_ids:
-                placeholders = ','.join(['?' for _ in factor_ids])
-                query += f" AND fd.factor_id IN ({placeholders})"
-                params.extend(factor_ids)
-            else:
-                return pd.DataFrame()
 
         query += " ORDER BY fd.trade_date"
 

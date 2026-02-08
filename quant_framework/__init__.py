@@ -7,7 +7,7 @@ __version__ = "1.0.0"
 __author__ = "Stocka Team"
 
 from .data.data_handler import DataHandler
-from .data.data_handler_file import DataHandlerF
+from .data.data_handler_f import DataHandlerF
 from .strategy.base_strategy import BaseStrategy, Signal
 from .strategy.ma_strategy import SimpleMAStrategy, DoubleMAStrategy, MultiMAStrategy
 from .strategy.ml_strategy import MLStrategy
