@@ -3,98 +3,159 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from datetime import date
-from quant_framework import MLStrategy, LiveTrader
-from quant_framework.utils.logger import get_logger
 import pandas as pd
+
+
+from datetime import date
+from quant_framework import MLStrategy, DataHandler, DataUpdater, Alpha158
+from quant_framework.utils.logger import get_logger
+from tqdm import tqdm
 
 # # 设置环境变量，让所有模块的日志都输出到同一个文件
 # os.environ['STOCKA_LOG_FILE'] = 'logs/realtime_example.log'
 
 logger = get_logger(__name__)
 
-STOCKA_BASE_DIR = "/home/zzy/projects/stocka"
+# STOCKA_BASE_DIR = "/home/zzy/projects/stocka"
+STOCKA_BASE_DIR = "/Users/zhaozhiyu/Projects/stocka"
 
-# 加载股票名称映射
-def load_stock_names():
-    """加载股票代码到名称的映射"""
-    stock_names = {}
+def update_factors(
+    data_handler: DataHandler,
+    data_updater: DataUpdater,
+    last_trading_date: date,
+    factor_calculator
+):
+    
 
-    # 加载上海股票列表
-    sh_file = os.path.join(STOCKA_BASE_DIR, "data/stock/list/sh_stock_list.csv")
-    if os.path.exists(sh_file):
-        df_sh = pd.read_csv(sh_file, encoding='utf-8')
-        for _, row in df_sh.iterrows():
-            code = str(row['证券代码'])
-            name = row['证券简称']
-            stock_names[code] = name
+    stock_code_list = data_handler.get_all_codes()
+    # stock_code_list = ["000001", "000002", "600000"]
 
-    # 加载深圳股票列表
-    sz_file = os.path.join(STOCKA_BASE_DIR, "data/stock/list/sz_stock_list.csv")
-    if os.path.exists(sz_file):
-        df_sz = pd.read_csv(sz_file, encoding='utf-8')
-        for _, row in df_sz.iterrows():
-            code = str(row['A股代码'])
-            name = row['A股简称']
-            stock_names[code] = name
+    # 1. 更新价格数据
+    update_result = data_updater.update_batch_stock_data(
+        stock_codes=stock_code_list, end_date=last_trading_date.strftime('%Y%m%d')
+    )
+    
+    update_failure_stocks = update_result['failed_stocks']
+    logger.info(f"更新失败列表: {update_failure_stocks}")
 
-    logger.info(f"加载了 {len(stock_names)} 只股票的名称信息")
-    return stock_names
+    # 2. 注册因子定义
+    for factor_id, factor_name, factor_category, factor_desc in Alpha158.DEFINITIONS:
+        data_handler.register_factor(factor_id, factor_name, factor_category, factor_desc)
 
-# 加载股票名称
-stock_name_map = load_stock_names()
+    factor_end_date = last_trading_date
+    factor_start_date = data_handler.get_previous_trading_date(factor_end_date, 60)
 
-# 1. 创建策略
-strategy = MLStrategy(params={
-    'model_path': os.path.join(STOCKA_BASE_DIR, 'examples/lightgbm_model.pkl'),
-    'top_k': 20,
-    'force_rebalance': True,
-    # 'rebalance_days': 3,
-    # 'stop_loss': 0.01,
-    # 'stop_loss_check_daily': True,
-})
+    factor_df = None
+    skipped_count = 0
+    calculated_count = 0
 
-strategy = MLStrategy({
-    'model_path': os.path.join(STOCKA_BASE_DIR, './ckpt/lightgbm_model_2005_2021.pkl'),
-    'weight_method': 'equal',
-    # 'weight_method': 'score',
-    'min_score': 0.1,
-    'rebalance_days': 3,
-    'top_k': 3,
-    'stop_loss': 0.01,
-})
+    pbar = tqdm(stock_code_list)
+    logger.info("开始计算因子")
+    for code in pbar:
+        pbar.set_postfix({"code": code, "skip": skipped_count, "calc": calculated_count})
+        
+        if code in update_failure_stocks:
+            skipped_count += 1
+            continue
 
-# 2. 创建实盘交易调度器
-trader = LiveTrader(
-    strategy=strategy,
-    data_dir=os.path.join(STOCKA_BASE_DIR, "data/stock/kline/day"),
-    signal_output_dir="signals",
-)
+        # 3. 检查是否已存在该交易日的因子记录
+        existing_factors = data_handler.get_stock_factors(
+            stock_code=code,
+            start_date=factor_end_date,
+            end_date=factor_end_date
+        )
+        
+        if not existing_factors.empty:
+            # 已存在因子记录，跳过计算
+            skipped_count += 1
+            # logger.debug(f"股票 {code} 在 {factor_end_date} 的因子已存在，跳过计算")
+            continue
 
-# 3. 运行（自动更新数据 + 生成信号，强制调仓）
-result = trader.run_with_update(
-    target_date=date.today(),
-    force_rebalance=True,  # 强制调仓，忽略调仓周期
-    export_format="csv"
-)
+        # 4. 计算新因子
+        df = data_handler.get_range_data([code], factor_start_date, factor_end_date)
+        
+        new_factor_row = factor_calculator.calculate(df).iloc[[-1]]
 
-# 4. 查看结果 - 只显示选中的股票代码和名称
-run_result = result['run_result']
-if run_result['signals_generated'] > 0:
-    logger.info(f"\n{'='*60}")
-    logger.info(f"选股结果（前 {strategy.params['top_k']} 名）")
-    logger.info(f"{'='*60}")
+        if factor_df is None:
+            factor_df = new_factor_row
+        else:
+            factor_df = pd.concat([factor_df, new_factor_row], ignore_index=False)
+            
+        calculated_count += 1
+        
+    if factor_df is not None:
+        factor_df = factor_df.set_index('code')
 
-    # 只显示买入信号的股票（这些就是选中的股票）
-    buy_signals = [s for s in run_result['signals'] if s.signal_type == 'BUY']
-    logger.info(f"{'排名':<5} {'股票代码':<10} {'股票名称':<12} {'预测分数'}")
-    logger.info(f"{'-'*60}")
 
-    for idx, signal in enumerate(buy_signals, 1):
-        # 从reason中提取预测分数
-        score_str = signal.reason.split('预测分数: ')[1] if '预测分数:' in signal.reason else 'N/A'
-        # 获取股票名称
-        stock_name = stock_name_map.get(signal.code, '未知')
-        logger.info(f"{idx:<5} {signal.code:<10} {stock_name:<12} {score_str}")
-else:
-    logger.warning("未生成任何信号")
+    logger.info(f"因子计算完成: 共 {len(stock_code_list)} 只股票，"
+                f"跳过 {skipped_count} 只，新计算 {calculated_count} 只")
+    
+    # 5. 因子入库
+    if factor_df is not None:
+        factor_names = [d[1] for d in Alpha158.DEFINITIONS]
+        data_handler.save_factors(factor_df[factor_names], factor_end_date)
+    
+    
+def get_top_n_stocks(data_handler: DataHandler, last_trading_date: date):
+    strategy = MLStrategy({
+        # 'model_path': os.path.join(STOCKA_BASE_DIR, './ckpt/lightgbm_model_2005_2021.pkl'),
+        'model_path': os.path.join(STOCKA_BASE_DIR, './ckpt/lightgbm_model_2015_2021.pkl'),
+    })
+    
+    predictions = strategy.realtime_prediction(data_handler, last_trading_date, 20)
+
+    if predictions is None:
+        logger.warning("预测结果为空")
+        return
+    
+    rank_list, code_list, name_list, score_list = [], [], [], []
+    
+    for prediction in predictions:
+        pred_date = prediction['date']
+        pred_result = prediction['predictions']
+        
+        if pred_date != last_trading_date:
+            continue
+        
+        rank = 1
+        for stock_code, pred_score in pred_result:
+            stock_info = data_handler.get_stock_info(int(stock_code))
+            if len(stock_info) == 0 or stock_info is None:
+                stock_name = "股票名称获取失败"
+            else:
+                stock_name = stock_info['stock_name'].iloc[0]
+            
+            logger.info(f"rank={rank}, code={stock_code}, name={stock_name}, score={pred_score}")
+            rank_list.append(rank)
+            code_list.append(stock_code)
+            name_list.append(stock_name)
+            score_list.append(pred_score)
+            
+            rank += 1
+            
+    pred_df = pd.DataFrame({'rank': rank_list, 'code': code_list, 'name': name_list, 'score': score_list})
+    pred_save_dir = os.path.join(STOCKA_BASE_DIR, 'signals')
+    pred_save_path = os.path.join(pred_save_dir, f'{last_trading_date.strftime("%Y%m%d")}.csv')
+    
+    if not os.path.exists(pred_save_dir):
+        os.makedirs(pred_save_dir)
+    
+    pred_df.to_csv(pred_save_path, index=False)
+    logger.info(f"{last_trading_date} 的预测结果已保存到 {pred_save_path}")
+
+
+if __name__ == '__main__':
+
+    db_path = os.path.join(STOCKA_BASE_DIR, 'data/stock.db')
+
+    data_handler = DataHandler(db_path)
+    data_updater = DataUpdater(data_handler)
+    factor_calculator = Alpha158()
+    
+    # last_trading_date = data_updater.get_appropriate_end_date()
+    last_trading_date = date(2026, 2, 5)
+    logger.info(f"最近交易日: {last_trading_date}")
+    
+    update_factors(data_handler, data_updater, last_trading_date, factor_calculator)
+    
+    get_top_n_stocks(data_handler, last_trading_date)
