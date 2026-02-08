@@ -10,6 +10,7 @@ import numpy as np
 from pathlib import Path
 
 from ..data.data_handler import DataHandler
+from ..data.data_handler_f import DataHandlerF
 from .base_strategy import BaseStrategy, Signal
 from ..model import LGBModel
 from ..factor.alpha158 import Alpha158
@@ -85,17 +86,22 @@ class CSZScoreNorm:
         else:
             raise ValueError(f"不支持的标准化方法: {method}")
 
-    def __call__(self, df: pd.DataFrame, columns: List[str]) -> pd.DataFrame:
+    def __call__(self, df: pd.DataFrame, columns: List[str], realtime: bool = False) -> pd.DataFrame:
         """
         对指定列进行截面标准化
 
         Args:
             df: 输入数据 (需要有 date 列或多级索引)
             columns: 需要标准化的列名列表
+            realtime: 是否为实盘运行
 
         Returns:
             标准化后的数据
         """
+        if realtime:
+            df[columns] = df[columns].apply(self.zscore_func)
+            return df
+        
         # 如果 DataFrame 有 date 列 (多级索引已重置)
         if 'date' in df.columns:
             df[columns] = df[columns].groupby("date", group_keys=False).apply(self.zscore_func)
@@ -220,7 +226,7 @@ class MLStrategy(BaseStrategy):
         # 格式: [{'date': date, 'predictions': [(code, score), ...]}, ...]
         self.prediction_history = []    # 每次预测的前20名股票记录
 
-    def on_bar(self, data_handler, current_date: date, portfolio) -> List[Signal]:
+    def on_bar(self, data_handler: DataHandler, current_date: date, portfolio) -> List[Signal]:
         """
         每日运行策略逻辑
 
@@ -288,6 +294,35 @@ class MLStrategy(BaseStrategy):
         logger.info(f"{current_date}: 第 {self.trading_days_count} 个交易日, 调仓！选中 {len(selected_stocks)} 只股票, 生成 {len(signals)} 个信号")
 
         return signals
+    
+    def realtime_prediction(self, data_handler: DataHandler, current_date: date, top_n: int = 20):
+        """
+        实盘只需输出前k个股票及其分数
+
+        Args:
+            data_handler (DataHandler): 数据处理器
+            current_date (date): 当前日期
+
+        Returns:
+            预测结果
+        """
+        # 获取待选股票池
+        stock_pool = self._get_stock_pool(data_handler, current_date)
+
+        # 准备预测数据
+        pred_data = self._prepare_prediction_data(data_handler, current_date, stock_pool, True)
+
+        if pred_data is None or len(pred_data) == 0:
+            logger.warning(f"{current_date}: 没有可用的数据进行预测")
+            return None
+
+        # 使用模型预测
+        predictions = self.model.predict(pred_data)
+
+        # 保存前20名的预测结果
+        self._save_top_predictions(current_date, predictions, top_n)
+        
+        return self.prediction_history
 
     def _is_rebalance_day(self, current_date: date) -> bool:
         """
@@ -336,7 +371,7 @@ class MLStrategy(BaseStrategy):
         return data_handler.get_all_codes()
 
     def _prepare_prediction_data(self, data_handler: DataHandler, current_date: date,
-                                  stock_pool: List[str]) -> Optional[pd.DataFrame]:
+                                  stock_pool: List[str], realtime: bool = False) -> Optional[pd.DataFrame]:
         """
         准备预测所需的数据
 
@@ -350,20 +385,30 @@ class MLStrategy(BaseStrategy):
             data_handler: 数据处理器
             current_date: 当前日期（将使用前一个交易日的数据）
             stock_pool: 股票池
+            realtime: 是否为实盘运行
 
         Returns:
             准备好的预测数据
         """
         try:
-            # 获取前一个交易日的日期（用于预测当前日期，避免未来函数）
-            prediction_date = data_handler.get_previous_trading_date(current_date, n=1)
+            if not realtime:
+                # 回测时，获取前一个交易日的日期（用于预测当前日期，避免未来函数）
+                prediction_date = data_handler.get_previous_trading_date(current_date, n=1)
+            else:
+                # 生成实盘信号时，使用当前日期
+                prediction_date = current_date
 
             if prediction_date is None:
                 logger.warning(f"{current_date}: 没有前一个交易日的数据，无法进行预测")
                 return None
 
             # 获取前一个交易日的数据
-            daily_data = data_handler.get_daily_data(prediction_date)
+            if not realtime:
+                daily_data = data_handler.get_daily_data(prediction_date)
+            else:
+                daily_stock = data_handler.get_daily_data(prediction_date).set_index('code')
+                daily_factor = data_handler.get_factor_cross_section(prediction_date)
+                daily_data = pd.concat([daily_stock, daily_factor], axis=1, ignore_index=False)
 
             if daily_data is None or len(daily_data) == 0:
                 return None
@@ -375,11 +420,7 @@ class MLStrategy(BaseStrategy):
             missing_factors = set(self.factors) - set(daily_data.columns)
 
             if missing_factors:
-                # 因子不存在，需要实时计算
-                logger.info(f"{current_date} (使用{prediction_date}的数据): 检测到 {len(missing_factors)} 个因子列不存在，开始实时计算...")
-                pred_data = self._calculate_factors_realtime(
-                    data_handler, prediction_date, stock_pool
-                )
+                raise ValueError("因子缺失")
             else:
                 # 因子已存在，直接使用
                 pred_data = daily_data.copy()
@@ -395,7 +436,7 @@ class MLStrategy(BaseStrategy):
                 return None
 
             # 截面标准化 (Cross Sectional Z-Score Normalization)
-            pred_data = self.normalizer(pred_data, self.factors)
+            pred_data = self.normalizer(pred_data, self.factors, realtime)
 
             # 填充缺失值为 0
             pred_data[self.factors] = pred_data[self.factors].fillna(0)
@@ -407,145 +448,6 @@ class MLStrategy(BaseStrategy):
             import traceback
             traceback.print_exc()
             return None
-
-    def _calculate_factors_realtime(self, data_handler: DataHandler, prediction_date: date,
-                                    stock_pool: List[str]) -> Optional[pd.DataFrame]:
-        """
-        实时计算因子值（用于实盘交易）- 多进程并行版本
-
-        使用多进程并行计算所有股票的因子，显著提升性能
-
-        Args:
-            data_handler: 数据处理器
-            prediction_date: 预测日期（使用该日期的数据进行预测）
-            stock_pool: 股票池
-
-        Returns:
-            包含因子值的 DataFrame，索引为股票代码
-        """
-        import time
-        import multiprocessing as mp
-        from multiprocessing import Pool
-        from tqdm import tqdm
-
-        start_time = time.time()
-        prediction_ts = pd.Timestamp(prediction_date)
-
-        # 确定进程数
-        num_cpus = mp.cpu_count()
-        num_processes = max(1, num_cpus - 1)  # 保留一个核心给系统
-
-        logger.info(f"开始为 {len(stock_pool)} 只股票并行计算因子（多进程模式）...")
-        logger.info(f"  - 预测日期: {prediction_date}")
-        logger.info(f"  - CPU核心数: {num_cpus}")
-        logger.info(f"  - 使用进程数: {num_processes}")
-
-        # 第一步：批量加载所有股票的历史数据
-        logger.info(f"[1/3] 批量加载股票历史数据...")
-        load_start = time.time()
-
-        tasks = []  # 存储 (stock_data, factor_calculator, prediction_ts, code, min_history_length)
-        skipped_count = 0
-        loaded_count = 0
-
-        for code in stock_pool:
-            try:
-                stock_data = data_handler.get_data_before(code, prediction_date)
-
-                if stock_data is None or len(stock_data) == 0:
-                    skipped_count += 1
-                    continue
-
-                # 检查历史数据是否足够
-                if len(stock_data) < self.min_history_length:
-                    skipped_count += 1
-                    continue
-
-                # 检查是否有 prediction_date 的数据
-                if prediction_ts not in stock_data.index:
-                    skipped_count += 1
-                    continue
-
-                # 准备任务参数（使用 starmap 时会自动解包）
-                tasks.append((stock_data, self.factor_calculator, prediction_ts, code, self.min_history_length))
-                loaded_count += 1
-
-            except Exception:
-                skipped_count += 1
-                continue
-
-        load_time = time.time() - load_start
-        logger.info(f"  ✓ 加载完成: {loaded_count} 只股票成功, {skipped_count} 只跳过 (耗时: {load_time:.2f}秒)")
-
-        if not tasks:
-            logger.error(f"没有成功加载任何股票的数据")
-            return None
-
-        # 第二步：多进程并行计算因子
-        logger.info(f"[2/3] 并行计算 Alpha158 因子（{num_processes} 进程）...")
-        calc_start = time.time()
-
-        all_factor_data = []
-
-        try:
-            with Pool(processes=num_processes) as pool:
-                # 使用 starmap 自动解包参数
-                # imap 可以显示进度，但不会按顺序返回
-                results = list(tqdm(
-                    pool.starmap(_calculate_single_stock_factors, tasks),
-                    total=len(tasks),
-                    desc="计算因子",
-                    unit="股"
-                ))
-
-            # 分离成功和失败的结果
-            for code, factor_data in results:
-                if factor_data is not None:
-                    all_factor_data.append(factor_data)
-
-        except Exception as e:
-            logger.error(f"多进程计算出错: {e}")
-            import traceback
-            traceback.print_exc()
-            return None
-
-        calc_time = time.time() - calc_start
-        success_count = len(all_factor_data)
-        logger.info(f"  ✓ 因子计算完成: {success_count} 只股票成功 (耗时: {calc_time:.2f}秒)")
-
-        if not all_factor_data:
-            logger.error(f"没有成功计算任何股票的因子")
-            return None
-
-        # 第三步：合并结果
-        logger.info(f"[3/3] 合并结果...")
-        merge_start = time.time()
-
-        # 合并所有因子数据
-        all_factors = pd.concat(all_factor_data, ignore_index=True)
-
-        # 设置索引为股票代码
-        pred_data = all_factors.set_index('stock_code')
-        pred_data.index.name = 'code'
-
-        # 删除 date 列（已经不需要了）
-        if 'date' in pred_data.columns:
-            pred_data = pred_data.drop(columns=['date'])
-
-        merge_time = time.time() - merge_start
-        logger.info(f"  ✓ 合并完成 (耗时: {merge_time:.2f}秒)")
-
-        # 总耗时统计
-        total_time = time.time() - start_time
-        logger.info(f"✓ 多进程因子计算完成！")
-        logger.info(f"  - 总耗时: {total_time:.2f}秒 ({total_time/60:.1f}分钟)")
-        logger.info(f"  - 成功: {len(pred_data)} 只")
-        logger.info(f"  - 跳过: {skipped_count} 只")
-        logger.info(f"  - 平均速度: {total_time/len(pred_data):.3f}秒/股")
-        logger.info(f"  - 理论加速比: {num_processes}x")
-        logger.info(f"  - 实际加速比: {9.64 / (total_time/len(pred_data)):.1f}x (相比原版9.64秒/股)")
-
-        return pred_data
 
     def _save_top_predictions(self, current_date: date, predictions: pd.Series, top_n: int = 20) -> None:
         """
