@@ -142,7 +142,7 @@ def example_query_time_series():
     stock_factors = handler.get_stock_factors(
         '000001',
         factor_names=['MA5', 'MA10'],
-        start_date=date(2024, 1, 1),
+        target_date=date(2024, 1, 1),
         end_date=date(2024, 1, 31)
     )
 

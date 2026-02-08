@@ -57,17 +57,19 @@ def main():
             "subsample": 0.8789,
             "lambda_l1": 205.6999,
             "lambda_l2": 580.9768,
-            "max_depth": 12,
-            "num_leaves": 510,
+            # "max_depth": 12,
+            "max_depth": 10,
+            # "num_leaves": 510,
+            "num_leaves": 255,
             "num_threads": 32,
         },
 
         # ==================== 策略配置 ====================
         'strategy_params': {
-            'top_k': 10,  # 选取预测分数最高的10只股票
+            'top_k': 3,  # 选取预测分数最高的10只股票
             'rebalance_days': 3,  # 每7个交易日调仓一次
             'weight_method': 'equal',  # 等权重
-            'stop_loss': 0.01,  # 3%止损
+            'stop_loss': 0.01,  # 1%止损
             'stop_loss_check_daily': True,  # 每日检查止损
         },
 

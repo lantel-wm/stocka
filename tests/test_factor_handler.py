@@ -196,7 +196,7 @@ class TestFactorHandler(unittest.TestCase):
         stock_factors = self.handler.get_stock_factors(
             '000001',
             factor_names=['MA5'],
-            start_date=date(2024, 1, 1),
+            target_date=date(2024, 1, 1),
             end_date=date(2024, 1, 2)
         )
 
