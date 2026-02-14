@@ -9,6 +9,7 @@ TOP_N="${TOP_N:-50}"
 LOG_DIR="${LOG_DIR:-logs}"
 CACHE_DIR="${CACHE_DIR:-signals}"
 SKIP_CACHE="${SKIP_CACHE:-false}"
+NOTIFY="${NOTIFY:-false}"  # 是否发送邮件通知
 
 # 生成带日期时间的日志文件名
 LOG_TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
@@ -47,6 +48,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --skip-cache)
             SKIP_CACHE="true"
+            shift
+            ;;
+        --notify)
+            NOTIFY="true"
             shift
             ;;
         *)
@@ -89,6 +94,17 @@ if [ "$SKIP_CACHE" != "true" ] && [ -n "$CACHE_FILE" ] && [ -f "$CACHE_FILE" ]; 
     cat "$CACHE_FILE"
     echo ""
     echo "===== 缓存文件: $CACHE_FILE ====="
+
+    # 如果启用通知，发送邮件
+    if [ "$NOTIFY" = "true" ]; then
+        echo ""
+        echo "===== 发送邮件通知 ====="
+        if [ -f "notify_config.yaml" ]; then
+            python -m quant_framework.cli notify send --config notify_config.yaml --date "$PREDICT_DATE" 2>&1
+        else
+            echo "警告: 未找到 notify_config.yaml，跳过邮件通知"
+        fi
+    fi
     exit 0
 fi
 
@@ -133,3 +149,15 @@ fi
 
 echo ""
 echo "===== routine 任务完成 ====="
+
+# 发送邮件通知（如果启用）
+if [ "$NOTIFY" = "true" ] && [ -f "$CACHE_FILE" ]; then
+    echo ""
+    echo "===== 发送邮件通知 ====="
+    # 使用通知配置文件发送
+    if [ -f "notify_config.yaml" ]; then
+        python -m quant_framework.cli notify send --config notify_config.yaml --date "$PREDICT_DATE" 2>&1 | tee -a "$STOCKA_LOG_FILE"
+    else
+        echo "警告: 未找到 notify_config.yaml，跳过邮件通知"
+    fi
+fi
