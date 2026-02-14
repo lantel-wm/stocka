@@ -30,14 +30,52 @@ class Config:
         self.config = self._load_config()
 
     def _load_config(self) -> Dict[str, Any]:
-        """加载配置文件"""
+        """加载配置文件并解析环境变量"""
         if not os.path.exists(self.config_path):
             raise FileNotFoundError(f"配置文件不存在: {self.config_path}")
 
         with open(self.config_path, 'r', encoding='utf-8') as f:
             config = yaml.safe_load(f)
 
+        # 解析环境变量
+        config = self._resolve_env_vars(config)
+
         return config
+
+    def _resolve_env_vars(self, value: Any) -> Any:
+        """递归解析配置值中的环境变量
+
+        支持格式:
+        - ${VAR}         - 引用环境变量，不存在则返回空字符串
+        - ${VAR:-default} - 引用环境变量，不存在则返回默认值
+        """
+        if isinstance(value, dict):
+            return {k: self._resolve_env_vars(v) for k, v in value.items()}
+        elif isinstance(value, list):
+            return [self._resolve_env_vars(item) for item in value]
+        elif isinstance(value, str):
+            return self._replace_env_var(value)
+        return value
+
+    def _replace_env_var(self, value: str) -> str:
+        """替换字符串中的环境变量"""
+        import re
+
+        # 匹配 ${VAR} 或 ${VAR:-default}
+        pattern = r'\$\{([^}]+)\}'
+
+        def replacer(match):
+            var_expr = match.group(1)
+
+            # 检查是否有默认值
+            if ':-' in var_expr:
+                var_name, default_val = var_expr.split(':-', 1)
+                return os.getenv(var_name, default_val)
+            else:
+                var_name = var_expr
+                return os.getenv(var_name, '')
+
+        return re.sub(pattern, replacer, value)
 
     def reload(self) -> None:
         """重新加载配置文件"""
@@ -133,6 +171,14 @@ class Config:
     def get_output_config(self) -> Dict[str, Any]:
         """获取输出配置"""
         return self.get('output', {})
+
+    def get_notification_config(self) -> Dict[str, Any]:
+        """获取通知配置"""
+        return self.get('notification', {})
+
+    def get_scheduler_config(self) -> Dict[str, Any]:
+        """获取调度器配置"""
+        return self.get('scheduler', {})
 
     # ========== 策略创建方法 ==========
 
