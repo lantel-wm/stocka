@@ -23,7 +23,7 @@ class DataHandler:
     # 表名常量
     TABLE_PRICES = 'stock_prices'
     TABLE_STOCK_INFO = 'stock_info'
-    TABLE_TRADING_DAYS = 'trading_days'
+    TABLE_TRADING_DAYS = 'trading_dates'
     TABLE_FACTOR_DEFINITIONS = 'factor_definitions'
     TABLE_FACTOR_DATA = 'factor_data'
 
@@ -36,6 +36,7 @@ class DataHandler:
         """
         self.db_path = db_path
         self.available_dates = []
+        self.trading_dates = []
         self.stock_codes = []
 
         # 检查数据库文件是否存在
@@ -66,7 +67,7 @@ class DataHandler:
         """).fetchdf()
         self.stock_codes = result['code'].tolist()
 
-        # 获取所有可用交易日期
+        # 获取所有可用交易日期（从价格表）
         result = self.con.execute(f"""
             SELECT DISTINCT date FROM {self.TABLE_PRICES} ORDER BY date
         """).fetchdf()
@@ -74,6 +75,33 @@ class DataHandler:
         # 转换为date对象
         self.available_dates = [d.date() if hasattr(d, 'date') else d
                                for d in self.available_dates]
+
+        # 加载交易日历（从 trading_dates 表）
+        self._load_trading_dates()
+
+    def _load_trading_dates(self) -> None:
+        """加载交易日历（从 trading_dates 表）"""
+        # 检查 trading_dates 表是否存在
+        table_exists = self.con.execute(f"""
+            SELECT table_name FROM information_schema.tables
+            WHERE table_name = '{self.TABLE_TRADING_DAYS}'
+        """).fetchone()
+
+        if table_exists:
+            # 从 trading_dates 表获取交易日期（只取交易日）
+            result = self.con.execute(f"""
+                SELECT date FROM {self.TABLE_TRADING_DAYS}
+                WHERE is_trading_day = true
+                ORDER BY date
+            """).fetchdf()
+            self.trading_dates = result['date'].tolist()
+        else:
+            # 回退：使用 available_dates
+            self.trading_dates = self.available_dates.copy()
+
+        # 转换为date对象
+        self.trading_dates = [d.date() if hasattr(d, 'date') else d
+                             for d in self.trading_dates]
 
     def get_stock_data(self, code: str,
                        start_date: Optional[date] = None,
@@ -265,7 +293,7 @@ class DataHandler:
             >>> prev_3_date = data_handler.get_previous_trading_date(date(2024, 1, 10), n=3)
         """
         # 获取所有交易日期
-        all_dates = self.available_dates
+        all_dates = self.trading_dates
 
         # 找到current_date在交易日期中的位置
         try:
@@ -273,6 +301,7 @@ class DataHandler:
         except ValueError:
             # current_date不是交易日，找到不晚于current_date的最后一个交易日
             valid_dates = [d for d in all_dates if d <= current_date]
+            print("valid_dates: ", valid_dates[-5:])
             if not valid_dates:
                 return None
             current_idx = all_dates.index(valid_dates[-1])
@@ -507,11 +536,11 @@ class DataHandler:
 
         if start_date:
             query += " AND date >= ?"
-            params.append(start_date)
+            params.append(start_date.strftime("%Y-%m-%d"))
 
         if end_date:
             query += " AND date <= ?"
-            params.append(end_date)
+            params.append(end_date.strftime("%Y-%m-%d"))
 
         query += " ORDER BY date"
 
@@ -529,7 +558,10 @@ class DataHandler:
             是否为交易日
         """
         trading_days = self.get_trading_days(date, date)
-        return date in trading_days
+        # 将 trading_days 中的元素转换为 date 对象，确保类型一致
+        # 因为 get_trading_days 返回的可能是 pandas.Timestamp 对象
+        trading_days_dates = [d.date() if hasattr(d, 'date') else d for d in trading_days]
+        return date in trading_days_dates
 
     def _init_factor_tables(self) -> None:
         """初始化因子表（如果不存在）"""
