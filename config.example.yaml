@@ -1,0 +1,122 @@
+# Stocka 量化框架配置文件
+#
+# 复制此文件为 config.yaml 并修改配置
+
+# ============================================
+# 数据配置
+# ============================================
+data:
+  db_path: "data/stock.db"
+  start_date: "2020-01-01"
+  end_date: null  # null 表示使用最新日期
+
+# ============================================
+# 回测配置
+# ============================================
+backtest:
+  initial_capital: 1000000
+  start_date: "2022-01-01"
+  end_date: "2024-12-31"
+  benchmark: "000300.SH"  # 沪深300
+
+# ============================================
+# 策略配置
+# ============================================
+strategy:
+  type: "ml"
+  model_path: "ckpt/lightgbm_model_2005_2021.pkl"
+  top_n: 50
+  factor_name: "alpha158"
+
+# ============================================
+# 通知配置
+# ============================================
+notification:
+  # 默认推送渠道列表
+  default_channels:
+    - email
+
+  # 邮件配置 (SMTP)
+  email:
+    enabled: true
+    smtp_server: "smtp.qq.com"
+    smtp_port: 465
+    use_ssl: true
+    # 发件人邮箱
+    username: "your_email@qq.com"
+    # 密码或授权码 - 建议通过环境变量 ${EMAIL_PASSWORD} 设置
+    password: "${EMAIL_PASSWORD}"
+    from_addr: "your_email@qq.com"
+    # 收件人列表
+    to_addrs:
+      - "recipient@example.com"
+    # 邮件主题模板，支持 {date} 和 {count} 变量
+    subject_template: "【选股日报】{date} 推荐 {count} 只股票"
+
+  # 飞书配置 (可选)
+  feishu:
+    enabled: false
+    # 自定义机器人 webhook 地址
+    webhook_url: "https://open.feishu.cn/open-apis/bot/v2/hook/xxxx"
+    # 签名密钥 - 建议通过环境变量设置
+    secret: "${FEISHU_SECRET}"
+    # @ 用户列表，为空则不@
+    at_users: []
+
+  # 企业微信配置 (可选)
+  wechat:
+    enabled: false
+    # 群机器人 webhook 地址
+    webhook_url: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxxx"
+
+  # 钉钉配置 (可选)
+  dingtalk:
+    enabled: false
+    # 自定义机器人 webhook 地址
+    webhook_url: "https://oapi.dingtalk.com/robot/send?access_token=xxxx"
+    # 签名密钥
+    secret: "${DINGTALK_SECRET}"
+
+# ============================================
+# 调度器配置
+# ============================================
+scheduler:
+  # 任务运行时间 (HH:MM 格式)
+  run_time: "16:30"
+  # 时区
+  timezone: "Asia/Shanghai"
+  # 是否只在交易日运行
+  trading_days_only: true
+  # 重试配置
+  retry:
+    max_attempts: 3
+    delay_seconds: 300  # 失败后5分钟重试
+  # 任务超时时间（分钟）
+  timeout_minutes: 30
+
+# ============================================
+# 报告配置
+# ============================================
+report:
+  # 包含的股票数量
+  top_n: 50
+  # 模板风格: simple/detailed
+  template_style: "detailed"
+
+# ============================================
+# 交易成本配置
+# ============================================
+transaction_cost:
+  commission_rate: 0.00025  # 万分之2.5
+  stamp_duty: 0.001         # 千分之1（卖出时收取）
+  transfer_fee: 0.00002     # 过户费
+  min_commission: 5         # 最低佣金
+
+# ============================================
+# 风险控制配置
+# ============================================
+risk_control:
+  max_position_per_stock: 0.1  # 单只股票最大仓位
+  max_drawdown_limit: 0.2      # 最大回撤限制
+  stop_loss_ratio: 0.1         # 止损比例
+  take_profit_ratio: 0.2       # 止盈比例
