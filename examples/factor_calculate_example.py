@@ -105,8 +105,7 @@ if __name__ == '__main__':
     logger.info("")
 
     # 获取所有股票代码
-    # all_codes = data_handler.get_all_codes()
-    all_codes = ['000001']
+    all_codes = data_handler.get_all_codes()
     logger.info(f"数据库中股票数量: {len(all_codes)}")
     logger.info("")
 

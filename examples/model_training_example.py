@@ -28,7 +28,7 @@ def main():
         'data_path': '../data/factor/day/alpha158',
         'use_parquet': True,
         # 'num_workers': 32,
-        'num_workers': 10,
+        'num_workers': 1,
         'min_data_points': 50,
 
         # ==================== 日期配置 ====================
@@ -90,12 +90,12 @@ def main():
     pipeline = MLPipeline(config)
 
     # ==================== 方式1：一键运行完整流程 ====================
-    logger.info("\n【方式1】一键运行完整流程")
-    results = pipeline.run()
+    # logger.info("\n【方式1】一键运行完整流程")
+    # results = pipeline.run()
 
     # ==================== 方式2：分步运行 ====================
-    # logger.info("\n【方式2】分步运行")
-    # pipeline.run_training()      # 1. 训练模型
+    logger.info("\n【方式2】分步运行")
+    results = pipeline.run_training()      # 1. 训练模型
     # pipeline.run_evaluation()    # 2. 评估模型
     # pipeline.run_backtest()      # 3. 回测
     # pipeline.save_results()      # 4. 保存结果

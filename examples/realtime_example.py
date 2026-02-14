@@ -32,7 +32,9 @@ def update_factors(
 
     # 1. 更新价格数据
     update_result = data_updater.update_batch_stock_data(
-        stock_codes=stock_code_list, end_date=last_trading_date.strftime('%Y%m%d')
+        stock_codes=stock_code_list,
+        end_date=last_trading_date.strftime('%Y%m%d'),
+        delay=0.3,
     )
     
     update_failure_stocks = update_result['failed_stocks']
@@ -152,8 +154,8 @@ if __name__ == '__main__':
     data_updater = DataUpdater(data_handler)
     factor_calculator = Alpha158()
     
-    # last_trading_date = data_updater.get_appropriate_end_date()
-    last_trading_date = date(2026, 2, 5)
+    last_trading_date = data_updater.get_appropriate_end_date()
+    # last_trading_date = date(2026, 2, 5)
     logger.info(f"最近交易日: {last_trading_date}")
     
     update_factors(data_handler, data_updater, last_trading_date, factor_calculator)
