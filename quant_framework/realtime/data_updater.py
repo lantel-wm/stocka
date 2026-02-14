@@ -77,6 +77,7 @@ class DataUpdater:
                     logger.warning(f"无法获取前一个交易日，使用简单日期减1: {appropriate_date}")
                 else:
                     logger.info(f"当前为交易日 {target_date}，时间 {now.strftime('%H:%M')} < 16:00，使用前一个交易日: {appropriate_date}")
+                    pass
             else:
                 # 已到16:00，使用当天
                 appropriate_date = target_date
@@ -164,7 +165,7 @@ class DataUpdater:
                 if start_date > end_date:
                     result['status'] = 'skipped'
                     result['message'] = f'数据已是最新（最新日期：{existing_end_str}）'
-                    logger.info(f"⊘ {stock_code}: 跳过（数据已是最新，最新日期：{existing_end_str}）")
+                    # logger.info(f"⊘ {stock_code}: 跳过（数据已是最新，最新日期：{existing_end_str}）")
                     return result
             else:
                 # 如果没有现有数据，下载全部历史数据（限制从2005年开始）
@@ -259,10 +260,10 @@ class DataUpdater:
             'details': []
         }
 
-        logger.info(f"\n开始批量更新 {len(stock_codes)} 只股票...")
+        logger.info(f"开始批量更新 {len(stock_codes)} 只股票...")
 
         for i, stock_code in enumerate(stock_codes):
-            logger.info(f"[{i+1}/{len(stock_codes)}] 更新 {stock_code}...")
+            # logger.info(f"[{i+1}/{len(stock_codes)}] 更新 {stock_code}...")
 
             result = self.update_stock_data(stock_code, end_date)
             results['details'].append(result)
@@ -276,7 +277,7 @@ class DataUpdater:
                 results['error'] += 1
                 results['failed_stocks'].append(stock_code)
 
-        logger.info(f"\n批量更新完成！")
+        logger.info(f" 批量更新完成！")
         logger.info(f"  总计: {results['total']} 只")
         logger.info(f"  成功: {results['success']} 只")
         logger.info(f"  跳过: {results['skipped']} 只")
@@ -284,8 +285,8 @@ class DataUpdater:
 
         return results
 
-    # @retry(stop=stop_after_attempt(5), wait=wait_fixed(2))
-    @retry(stop=stop_after_attempt(1), wait=wait_fixed(1))
+    @retry(stop=stop_after_attempt(5), wait=wait_fixed(2))
+    # @retry(stop=stop_after_attempt(1), wait=wait_fixed(1))
     def _fetch_stock_data_from_api(self,
                                    stock_code: str,
                                    start_date: str,
@@ -309,7 +310,6 @@ class DataUpdater:
 
             # 获取股票历史数据
             prefix = 'sh' if stock_code.startswith('6') else 'sz'
-            logger.info(f"symbol={prefix}{stock_code}, start_date={start_date}, end_date={end_date}")
             df = ak.stock_zh_a_daily(
                 symbol=f"{prefix}{stock_code}",
                 start_date=start_date,
