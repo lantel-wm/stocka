@@ -155,7 +155,8 @@ class MLPipeline:
         )
         combined_data_handler.load_data(
             start_date=combined_start,
-            end_date=combined_end
+            end_date=combined_end,
+            factors=self.config['factors'],
         )
 
         # 创建训练集 DataLoader（会从 DataHandlerF 中筛选训练日期范围的数据）

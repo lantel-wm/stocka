@@ -7,7 +7,7 @@ from typing import Dict, Optional
 import pandas as pd
 import numpy as np
 
-from ..data.data_handler import DataHandler
+from ..data.data_handler_f import DataHandlerF
 from ..utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -83,7 +83,7 @@ class DataLoader:
 
     def __init__(self,
                  segment: str,
-                 data_handler: DataHandler,
+                 data_handler: DataHandlerF,
                  factors: list,
                  start_date: str,
                  end_date: str,

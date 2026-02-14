@@ -12,6 +12,11 @@ import pandas as pd
 from multiprocessing import Pool
 from tqdm import tqdm
 
+from quant_framework.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
+
 
 class DataHandlerF:
     """
@@ -44,7 +49,7 @@ class DataHandlerF:
         self.stock_codes = []
 
     def load_data(self, start_date: Optional[str] = None,
-                  end_date: Optional[str] = None) -> None:
+                  end_date: Optional[str] = None, factors: List[str] = None) -> None:
         """
         加载数据（支持CSV和Parquet格式，支持多进程并行）
 
@@ -81,23 +86,23 @@ class DataHandlerF:
             if not all_files:
                 raise ValueError(f"白名单中的股票在数据目录中未找到。白名单: {whitelist}")
 
-            print(f"启用股票白名单，只加载 {len(all_files)} 只股票...")
+            logger.info(f"启用股票白名单，只加载 {len(all_files)} 只股票...")
 
         # 显示加载信息
         format_name = "Parquet" if use_parquet else "CSV"
-        print(f"开始加载数据，共找到 {len(all_files)} 个{format_name}文件...")
+        logger.info(f"开始加载数据，共找到 {len(all_files)} 个{format_name}文件...")
 
         if self.num_workers > 1:
-            print(f"使用 {self.num_workers} 个进程并行加载...")
-            data_frames = self._load_parallel(all_files, use_parquet, start_date, end_date)
+            logger.info(f"使用 {self.num_workers} 个进程并行加载...")
+            data_frames = self._load_parallel(all_files, use_parquet, start_date, end_date, factors)
         else:
-            data_frames = self._load_sequential(all_files, use_parquet, start_date, end_date)
+            data_frames = self._load_sequential(all_files, use_parquet, start_date, end_date, factors)
 
         if not data_frames:
             raise ValueError("没有加载到任何有效数据")
 
         # 合并所有数据
-        print("合并数据...")
+        logger.info("合并数据...")
         self.all_data = pd.concat(data_frames, ignore_index=True)
 
         # 确保code列是字符串类型
@@ -115,10 +120,10 @@ class DataHandlerF:
         # 转换为date对象
         self.available_dates = [d.date() for d in self.available_dates]
 
-        print(f"数据加载完成！")
-        print(f"  - 股票数量: {len(self.stock_codes)}")
-        print(f"  - 日期范围: {self.available_dates[0]} 至 {self.available_dates[-1]}")
-        print(f"  - 总数据点: {len(self.all_data)}")
+        logger.info(f"数据加载完成！")
+        logger.info(f"  - 股票数量: {len(self.stock_codes)}")
+        logger.info(f"  - 日期范围: {self.available_dates[0]} 至 {self.available_dates[-1]}")
+        logger.info(f"  - 总数据点: {len(self.all_data)}")
 
     def _detect_format(self) -> bool:
         """自动检测使用哪种文件格式"""
@@ -131,25 +136,26 @@ class DataHandlerF:
         csv_files = glob.glob(os.path.join(self.data_path, "*.csv"))
 
         if parquet_files and not csv_files:
-            print("检测到Parquet文件，使用Parquet格式")
+            logger.info("检测到Parquet文件，使用Parquet格式")
             return True
         elif csv_files and not parquet_files:
-            print("检测到CSV文件，使用CSV格式")
+            logger.info("检测到CSV文件，使用CSV格式")
             return False
         elif parquet_files and csv_files:
-            print("同时检测到Parquet和CSV文件，优先使用Parquet格式")
+            logger.info("同时检测到Parquet和CSV文件，优先使用Parquet格式")
             return True
         else:
             raise ValueError(f"数据目录中没有找到数据文件: {self.data_path}")
 
     def _load_sequential(self, all_files: List[str], use_parquet: bool,
-                         start_date: Optional[str], end_date: Optional[str]) -> List[pd.DataFrame]:
+                         start_date: Optional[str], end_date: Optional[str],
+                         factors: List[str]) -> List[pd.DataFrame]:
         """单进程顺序加载数据"""
         data_frames = []
         self.stock_codes = []
 
         for file_path in tqdm(all_files, desc="加载进度"):
-            df = self._load_single_file(file_path, use_parquet, start_date, end_date)
+            df = self._load_single_file(file_path, use_parquet, start_date, end_date, factors)
             if df is not None and len(df) >= self.min_data_points:
                 data_frames.append(df)
                 code = str(df['code'].iloc[0])
@@ -159,13 +165,14 @@ class DataHandlerF:
         return data_frames
 
     def _load_parallel(self, all_files: List[str], use_parquet: bool,
-                       start_date: Optional[str], end_date: Optional[str]) -> List[pd.DataFrame]:
+                       start_date: Optional[str], end_date: Optional[str],
+                       factors: List[str]) -> List[pd.DataFrame]:
         """多进程并行加载数据"""
         data_frames = []
         self.stock_codes = []
 
         # 准备参数
-        load_args = [(file_path, use_parquet, start_date, end_date)
+        load_args = [(file_path, use_parquet, start_date, end_date, factors)
                      for file_path in all_files]
 
         with Pool(self.num_workers) as pool:
@@ -192,14 +199,15 @@ class DataHandlerF:
 
     @staticmethod
     def _load_single_file(file_path: str, use_parquet: bool,
-                          start_date: Optional[str], end_date: Optional[str]) -> Optional[pd.DataFrame]:
+                          start_date: Optional[str], end_date: Optional[str],
+                          factors: List[str]) -> Optional[pd.DataFrame]:
         """加载单个文件"""
         try:
             # 读取文件
             if use_parquet:
                 df = pd.read_parquet(file_path)
             else:
-                df = pd.read_csv(file_path, encoding='utf-8', dtype={'股票代码': str})
+                df = pd.read_csv(file_path, encoding='utf-8')
 
             # 如果文件中没有股票代码，从文件名提取（保留前导0）
             if 'code' not in df.columns or df['code'].isna().all():
@@ -221,7 +229,7 @@ class DataHandlerF:
             return df
 
         except Exception as e:
-            print(f"\n读取文件失败 {file_path}: {e}")
+            logger.info(f"\n读取文件失败 {file_path}: {e}")
             return None
 
     def get_stock_data(self, code: str,
