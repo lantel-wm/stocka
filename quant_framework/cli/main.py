@@ -11,6 +11,7 @@ from quant_framework.cli.commands.data import DataCommand
 from quant_framework.cli.commands.factor import FactorCommand
 from quant_framework.cli.commands.ml import MLCommand
 from quant_framework.cli.commands.live import LiveCommand
+from quant_framework.cli.commands.strategy import StrategyCommand
 
 logger = get_logger(__name__)
 
@@ -28,10 +29,11 @@ def create_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例用法:
-  python -m quant_framework.cli data update --symbols 000001.SZ
-  python -m quant_framework.cli factor calculate --factor-name alpha158
+  python -m quant_framework.cli data update --db-path data/stock.db
+  python -m quant_framework.cli factor calculate --db-path data/stock.db
   python -m quant_framework.cli ml train --model-name lightgbm
   python -m quant_framework.cli live update --interval 60
+  python -m quant_framework.cli strategy predict --db-path data/stock.db --model-path ckpt/model.pkl
 
 更多信息请参考文档。
         """
@@ -63,6 +65,7 @@ def create_parser() -> argparse.ArgumentParser:
         FactorCommand(subparsers),
         MLCommand(subparsers),
         LiveCommand(subparsers),
+        StrategyCommand(subparsers),
     ]
 
     # 存储命令实例以便后续使用
