@@ -111,6 +111,9 @@ strategy_results/
 *.cache
 ckpt/
 
+# Notification config (contains sensitive info like SMTP passwords)
+notify_config.yaml
+
 # data (只忽略根目录下的data目录)
 /data/
 examples/data/
